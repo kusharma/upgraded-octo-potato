@@ -52,7 +52,7 @@ This portfolio showcases my work in four R courses, each with four reports.
 ## Course 2: Foundations of data science
 
 ### Report 1
-- [Report 1 HTML](Course2/Report1.html)
+- [Report 1 HTML](Course2/file:///Users/imackunal/Downloads/project-fds-c1-s26-3561-1887-master/Report_1/Project1_html.html)
 - [Report 1 PDF](Course2/Report1.pdf)
 
 ### Report 2
