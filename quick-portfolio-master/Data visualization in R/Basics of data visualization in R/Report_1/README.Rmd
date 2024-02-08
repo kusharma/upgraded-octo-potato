@@ -1,0 +1,234 @@
+---
+title: "Report 1: TIME SERIES"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(tsibble)
+
+data_smi <- read_csv("data/data_smi.csv")
+
+data_smi<-data_smi %>% 
+  mutate(date=dmy(date))
+```
+
+# Part 1 
+
+lineplot using the whole daily SMI values (i.e from January 1, 2015 to April 29, 2020)
+
+``` {r}
+
+line_plot <- data_smi %>% 
+  ggplot(mapping = aes(x = date, y = price)) + 
+  geom_line() +
+  labs(title = "Daily SMI Values") +
+  theme_minimal()
+
+plotly::ggplotly(line_plot)
+
+```
+
+# Part 2 and Part 3
+
+A lineplot using daily SMI values since January 1, 2019
+
+``` {r}
+
+line_plot2<-data_smi %>% 
+filter(date >= as.Date("2019-01-01"), date<=as.Date("2020-01-31")) %>% 
+  ggplot(mapping = aes(x = date, y = price)) + 
+  geom_line() +
+  geom_hline(aes(yintercept = 8900,colour="red"), show.legend = FALSE) +
+  labs(title = "Daily SMI Values") +
+  theme_minimal()
+
+line_plot2
+```
+
+# Part 4
+
+An example of ggplotly function 
+
+``` {r}
+
+plotly::ggplotly(line_plot2)
+
+```
+
+The last date in 2019 for which value was less than 8900 CHF was 28-01-2019.
+
+# Part 5
+
+Dates for which the SMI value was below CHF 8900 for the last time of the year 2019 and first time of year 2020:
+
+``` {r}
+
+last_date_2019<-data_smi %>% 
+  filter (price<8900 & year(date)==2019) %>% 
+  arrange(date) %>% 
+  pull(date) %>% 
+  last()
+
+first_date_2020<-data_smi %>% 
+  filter (price<8900 & year(date)==2020) %>% 
+  arrange(date) %>% 
+  pull(date) %>% 
+  first()
+```
+
+The two dates are `r format(first_date_2020)` and `r format(last_date_2019)`.
+
+# Part 6
+
+Number of days elapsed between the two dates
+
+``` {r}
+
+interval_days_value<-lubridate::interval(start=last_date_2019, end=first_date_2020) %>%
+  as.numeric('day')
+
+```
+
+`r interval_days_value` days  elapsed between the two dates.
+
+# Part 7 
+
+A timeplot showing SMI weekly mean values since January 2019
+
+``` {r}
+
+data_smi_weekly<-data_smi %>% 
+  filter(year(date)>=2019) %>% 
+  mutate(week=yearweek(date)) %>% 
+  group_by(week) %>% 
+  summarise(weekly_smi=mean(price)) %>% 
+  ungroup()
+
+data_smi_weekly %>% 
+  ggplot(mapping = aes(x = week, y = weekly_smi)) + 
+  geom_point(colour = "blue", size = 3)+
+  labs(title = "Weekly SMI Values", 
+       y="Weekly SMI (CHF)",x="Week number") +
+  theme_minimal()
+
+``` 
+
+The weekly SMI values have decreased after 8 weeks in year 2020.
+
+# Part 8 
+
+A timeplot showing daily SMI values since January 2019 versus week values
+
+``` {r}
+
+data_smi_weekly_daily<-data_smi %>% 
+  filter(year(date)>=2019) %>% 
+  mutate(week=yearweek(date)) %>% 
+  group_by(week) %>% 
+  mutate(weekly_smi=mean(price)) %>% 
+  ungroup()
+
+data_smi_weekly_daily %>%
+  ggplot(aes(x = week, y = price)) +
+  geom_point(size = 3, alpha = 0.6, colour="blue", show.legend = FALSE) +
+  labs(title = "Daily SMI Values displayed per week", 
+       y="Daily SMI (CHF)",x="Week number") 
+```
+
+# Part 9 
+
+A timeplot showing SMI monthly mean values since January 2019
+
+``` {r}
+
+data_smi_mthly<-data_smi_weekly_daily %>% 
+  filter(year(date)>=2019)%>% 
+  mutate(month=yearmonth(date)) %>% 
+  group_by(month) %>% 
+  mutate(monthly_smi=mean(price)) %>% 
+  ungroup()
+
+data_smi_mthly %>%
+  ggplot(aes(x = month, y = price)) +
+  #scale_x_continuous(breaks = 1:12) +
+  geom_point(aes(x=month,y=monthly_smi),colour="blue",size=3, alpha=0.5, show.legend = FALSE) +
+  labs(title = "Mean monthly SMI Values", 
+       y="Monthly SMI (CHF)",x="Month number") 
+
+```
+
+The monthly SMI values have decreased after 2nd month in year 2020.
+
+# Part 10 
+
+A timeplot showing daily SMI values since January 2019 versus week values
+
+``` {r}
+
+data_smi_mthly %>%
+  ggplot() +
+  #scale_x_continuous(breaks = 1:12) +
+  geom_point(aes(x=month,y=price),colour="blue",size=3, alpha=0.5, show.legend = FALSE) +
+  labs(title = "Daily SMI values since January 2019 versus month values", 
+       y="Daily SMI (CHF)",x="Month number") 
+
+```
+
+# Part 11
+
+Boxplots of daily SMI values since January 2019 (one boxplot for each month)
+
+``` {r}
+
+data_smi_mthly %>% 
+ ggplot(aes(x=month, y=price, fill=month, group=month)) +
+    geom_boxplot() + 
+  #scale_x_continuous(breaks=seq(1,13,1))+
+    geom_jitter(color="blue", size=0.4, alpha=0.9) +
+    theme(
+      legend.position="none",
+      plot.title = element_text(size=11)
+    ) +
+  labs(title = "Boxplots of daily SMI values since January 2019", 
+       y="Daily SMI (CHF)",x="Month number")
+
+``` 
+
+# Part 12
+
+Yahoo Finance Data
+
+``` {r}
+
+data_finance <- read_csv("data/QMCI.csv") %>% 
+  janitor::clean_names()
+
+data_finance<-data_finance %>% 
+  mutate(month=yearmonth(date)) %>% 
+  group_by(month) %>% 
+  mutate(monthly_volume=mean(volume)) %>% 
+  ungroup()
+
+data_finance_monthly<-data_finance %>% 
+distinct(month, monthly_volume) %>% 
+  mutate(ratio=monthly_volume/lag(monthly_volume)) %>% 
+  drop_na() 
+
+data_finance_monthly %>% 
+  ggplot(aes(x=month, y=ratio))+
+  geom_point()+
+  labs(title = "Fold change in transactions across months during Pandemic", 
+       y=" Ratio of transaction compared to previous month",x="Months")
+```
+
+The monthly transaction decreased after February and increased back in July and November after the lockdown was partially removed. This shows that finance industry started gaining confidence in the stock market. 
+

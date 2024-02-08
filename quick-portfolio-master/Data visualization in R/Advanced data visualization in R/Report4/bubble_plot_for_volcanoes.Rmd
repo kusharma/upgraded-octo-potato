@@ -1,0 +1,344 @@
+---
+title: 'Project4: Volcano Eruption Visualization'
+output: 
+  html_document: 
+    code_folding: "hide"
+---
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+# Part1: Getting the data
+
+```{r}
+
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(readtext)
+library(tidygraph)
+library(ggplot2)
+library(janitor)
+library(OpenStreetMap)
+library(mapview)
+library(mapedit)
+library(sf)
+library(forcats)
+library(kableExtra)
+library(ggpomological)
+library(RColorBrewer)
+library(gt)
+
+volcano <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/volcano.csv')
+eruptions <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/eruptions.csv')
+events <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/events.csv')
+tree_rings <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/tree_rings.csv')
+sulfur <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/sulfur.csv')
+```
+
+# Part2: Population within 100 km and at risk during volcanic eruptions
+
+```{r}
+
+world <- st_read("data/ne_110m_admin_0_countries.shp") %>% 
+  clean_names() %>% 
+  #rename(country=sovereignt) %>% 
+  mutate(name_sort = case_when(name_sort == "Macedonia, FYR" ~ "North Macedonia",
+         name_sort=="Slovak Republic" ~ "Slovakia",
+         name_sort=="United States of America" ~ "United States",
+         TRUE ~ as.character(name_sort)))
+
+dVolcano <-world  %>%
+  left_join(volcano, c("name_sort"="country")) %>% 
+  rename(country=name_sort) 
+
+dVolcano<-dVolcano %>% 
+  mutate(population_within_100_km=population_within_100_km/1e6)
+
+ggplot() + 
+coord_sf()+ 
+  geom_sf(data = dVolcano,
+                    aes(fill = population_within_100_km))+theme_void()+
+  labs(title="Population at risk during volcanic eruptions",
+       subtitle="Population within 100 km of volcanic eruption",
+       caption = "Source: Volcanic eruptions")  +
+  scale_fill_continuous(name =  "Population in millions")
+
+```
+\
+\ 
+Looking at the above figure from Part 2, we could see that population in some countries from South America and Africa, countries like Malaysia, Indonesia and Philipines have populations in the range 10-30 million which could be at risk due to volcanic eruptions.
+
+# Part3: Population within 100 km and at risk due to recent volcanic eruptions in year 2020
+
+```{r}
+volcanic_eruptions<-volcano  %>%
+  left_join(eruptions, by="volcano_number")%>% 
+  filter(start_year>=2000) %>% 
+  mutate(population_within_100_km=population_within_100_km/1e6)
+
+dEruptions_2000 <-world  %>%
+  left_join(volcanic_eruptions, c("name_sort"="country")) %>% 
+  rename(country=name_sort) 
+
+ggplot() + 
+coord_sf()+ 
+  geom_sf(data = dEruptions_2000,
+                    aes(fill = population_within_100_km))+theme_void()+
+  labs(title="Volcanic eruptions since year 2020",
+       subtitle="Population within 100 km of volcanic eruption",
+       caption = "Source: Volcanic eruptions") +
+  scale_fill_continuous(name =  "Population in millions")
+
+```
+
+\
+\ 
+Looking at the above figure from Part 3, we could see that there are population within 100km of volcanic erupted during 2020. Some region from North America and countries like Malaysia, Indonesia and Philippines,which could be at risk due to volcanic eruptions. The color of the graph shows the range of populations, 10-30 million in those regions
+
+# Part4: Frequency of causes for volcanic events
+
+```{r}
+
+events_factored<- 
+  events %>% select(event_type) %>% 
+  filter(!is.na(event_type)) %>% 
+  mutate(event_type = fct_lump(event_type, n = 10,other_level = "Other")) %>%          count(event_type) 
+
+events_factored %>% 
+  ggplot(mapping = aes(x=n,y=fct_reorder(event_type,.x = n))) +
+  geom_col() +
+  labs(title = "Frequency of causes for volcanic events", 
+       caption="Economist theme",
+       x="Frequency of volcanic events",
+       y="Cause of volcanic events")+
+  ggthemes::theme_economist( base_size = 12)+
+  theme(axis.title.x = element_text(size = 12, face = "bold",
+                                    margin = margin(t = 10, r = 00, b = 0, l = 0)))+
+  theme(axis.title.y = element_text(size = 12, face = "bold",
+                                    margin = margin(t = 0, r =10, b = 0, l = 00)))+
+  theme(axis.title = element_text(margin = margin(t = 00, r = 0, b =00, l = 0))) + 
+  theme(plot.title = element_text(size = 14, face = "bold",vjust = 3))
+
+```
+
+\
+\ 
+Looking at the above figure from Part 4, lot of miscellaneous reasons (others), higher VEI (explosivity index) and explosions dominate the causes for volcanic eruptions. Researchers still need to find and take into account multiple causes bundled up as miscellaneous reasons (others). This will help in prediction of probability for rare volcanic events.
+
+# Part3: How long have the volcanic eruptions continued ?
+
+```{r}
+
+volcano_duration<-eruptions %>% 
+  select(volcano_name, eruption_number, start_year, end_year) %>% 
+  drop_na() %>% 
+  group_by(volcano_name) %>% 
+  mutate(duration_year=end_year-start_year) %>% 
+  filter(duration_year>0) %>% 
+  arrange(desc(duration_year)) %>% 
+  ungroup()
+
+
+
+slice_head(volcano_duration,n=10) %>% 
+  arrange(desc(duration_year)) %>% 
+  kbl() %>%
+  kable_styling()
+  
+```
+
+\
+\ 
+Looking at the above table for Part 5, Volcanoes named Stromboli, Fogo and Yasur have continued erupting for 200-300 years.
+
+# Part6: Has the same volcano eurpted again. If so, how many times ?
+
+```{r}
+
+volcano_eruption_frequency<-eruptions %>% 
+  select(volcano_name, eruption_number) %>% 
+  drop_na() %>% 
+  group_by(volcano_name) %>% 
+  count(volcano_name) %>% 
+  ungroup()
+
+volcano_eruption_frequency %>% 
+  arrange(desc(n)) %>% 
+  slice_max(n=10, order_by=n) %>% 
+  rename(Count=n,
+         Volcano=volcano_name) %>% 
+    gt::gt() %>%
+  tab_style(
+    style = list(
+      cell_fill(color = "grey",
+                alpha=1),
+      cell_text(color = "cyan")
+    ),
+    locations = cells_body(
+      columns = vars(Volcano),
+      row=1)
+  ) 
+  
+```
+# Part7: Bubble plot for volcanic eruptions ?
+
+```{r}
+
+library(lubridate)
+library(viridis)
+library(forcats)
+
+eruption_data <- eruptions %>%
+  drop_na() %>%
+  filter(start_year >= 1900) %>%
+  mutate(
+    startdate_erupt = str_glue("{start_day}-{start_month}-{start_year}") %>%
+      dmy(),
+    enddate_erupt = str_glue("{end_day}-{end_month}-{end_year}") %>%
+      dmy()
+  ) %>% select(
+    volcano_name, volcano_number, startdate_erupt, enddate_erupt, vei, latitude, longitude) %>%
+    mutate(eruption_duration = round(as.numeric(
+      difftime(enddate_erupt, startdate_erupt, unit = "days")), 0)) %>%
+  arrange(desc(eruption_duration)) %>% 
+  slice_max(order_by = eruption_duration, n=20) %>% 
+  mutate(volcano_name=as.factor(volcano_name))
+
+  
+eruption_data %>%
+  ggplot() +  
+  geom_point(aes(x = year(startdate_erupt),y = eruption_duration,
+                 color=volcano_name, fill=volcano_name,
+                 size = eruption_duration,alpha=vei)) +
+  scale_size(range = c(1,20))+
+  scale_fill_brewer(palette = "RdYlBu",guide = "legend")+
+    #scale_color_viridis(discrete=TRUE) +
+  labs(
+    title="Eruption duration of top 20 volcanoes since 1900",
+    x="Starting Year",
+    y="Duration in days (log 10 scale)"
+  )+scale_y_continuous(trans='log10')+ 
+  theme(panel.grid.minor = element_blank(),
+        legend.position="bottom")+
+  ylim(1,40000)+xlim(1900,2020)
+
+
+ 
+```
+```{r}
+library(slider)
+
+p <- eruptions %>%
+  drop_na() %>%
+  filter(start_year >= 1900) %>%
+  mutate(
+    startdate_erupt = str_glue("{start_day}-{start_month}-{start_year}") %>%
+      dmy(),
+    enddate_erupt = str_glue("{end_day}-{end_month}-{end_year}") %>%
+      dmy()
+  ) %>% select(
+    volcano_name, volcano_number, startdate_erupt, enddate_erupt, vei, latitude, longitude) %>%
+    mutate(eruption_duration = round(as.numeric(
+      difftime(enddate_erupt, startdate_erupt, unit = "days")), 0)) %>% 
+  mutate(s2_rolling = slide_dbl(startdate_erupt, sum, .before = 1, .complete = TRUE))
+  
+  mutate(prev = lag(year(startdate_erupt), 1)) %>% 
+  mutate(MR_bar = abs(Average_xbar - prev))
+
+
+p <- ggplot(
+  eruption_data, 
+  aes(year(startdate_erupt),y = eruption_duration, 
+      size = eruption_duration, colour = volcano_name)
+  ) +
+  geom_point(show.legend = FALSE, alpha = 0.7) +
+  scale_color_viridis_d() +
+  scale_size(range = c(1, 20)) +
+  scale_y_log10() +
+  labs(x = "GDP per capita", y = "Life expectancy")
+
+library(gganimate)
+
+p + transition_time(startdate_erupt) +
+  labs(title = "Year: {frame_time}") +
+  view_follow(fixed_y = TRUE)
+
+```
+
+\
+\ 
+Looking at the above table for Part 6, Volcanoe named Etna has eruped more than 200 times, it is indeed a super active volcano. Something for Sicilian, italian and european people to watch out for.
+
+# Part8: Plotting moving average for sulphur concentration in the atmosphere ?
+
+```{r}
+
+library(hrbrthemes)
+library(extrafont)
+library(ggpomological)
+extrafont::font_import()
+
+sulfur <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/sulfur.csv')
+
+sulfur_mean_neem <-sulfur%>% 
+  select(year, neem) %>% 
+  mutate(mean_neem=mean(neem, na.rm=T),
+         two_std=mean_neem+2*sd(neem,na.rm=T))
+
+sulfur_mean_wdc <-sulfur%>% 
+  summarize(mean_wdc=mean(wdc, na.rm=T))
+
+plot_sulfur_neem <- sulfur %>%
+  ggplot(aes(x = year, y = neem)) +
+  geom_line(# plot raw values
+    size = 1,
+    alpha = 0.2) +
+  tidyquant::geom_ma(# plot moving average
+    n = 10,
+    size = 1,
+    color = "blue") +
+  labs(
+    title = "Sulfer detected from NEEM",
+    subtitle = "Moving average in blue and 2 st dev in red ",
+    caption =  "Data collected in ice cores from Greenland",
+    x = "Year",
+    y = "Sulfur concentration (ng/g) "
+  ) +
+  geom_line(data = sulfur_mean_neem, aes(x = year, y = two_std)
+            ,color = "red", linetype=2) +
+  scale_fill_pomological() + theme_pomological_fancy()
+
+
+plot_sulfur_wdc <- sulfur %>%
+  ggplot(aes(x = year, y = wdc)) +   # start ggplot
+  geom_line(# plot raw values
+    size = 1,
+    alpha = 0.2) +                      # semi-transparent line)
+  tidyquant::geom_ma(# plot moving average
+    n = 10,
+    size = 1,
+    color = "blue") +
+  labs(
+    title = "Sulfer detected from WDC",
+    subtitle = "Moving average across one year shown in blue",
+    caption =  "Data collected in ice cores from Antartica",
+    x = "Year",
+    y = "Sulfur concentration (ng/g) "
+  ) +
+  scale_fill_pomological()+theme_pomological_fancy()
+ 
+
+plot_sulfur_neem
+```
+
+\
+\ 
+Looking at the above table for Part 7, sulphur concentration in the atmosphere has crossed limits (beyond two standard deviation), four times in the year 500 to 700. It must have been difficult to breathe for the populations where such concentrations were higher, could have led to lot of morbidities. 
+

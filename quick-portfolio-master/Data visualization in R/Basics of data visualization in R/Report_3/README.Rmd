@@ -1,0 +1,357 @@
+---
+title: "Report 3: Cartography"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+
+library(dplyr)
+library(tidyverse)
+library(ggraph)
+library(readxl)
+library(tidyverse)
+library(visdat)
+library(readr)
+library(OpenStreetMap)
+library(mapview)
+library(mapedit)
+library(sf)
+library(tidyverse)
+library(janitor)
+library(ggrepel)
+
+data<- read_excel("data/TESEM0601573030089446.xlsx", 
+    sheet = "Sheet 1", skip = 9)
+
+```
+
+
+# Part 1
+
+Time series of Gap for different countries 
+
+```{r}
+
+data_cart<-data %>% 
+  slice(2:42) %>% 
+  select(time,starts_with("20")) %>% 
+  mutate(time=case_when(time=="European Union - 28 countries"~"European Union",
+                        time=="Euro area (19 countries)"~"Euro-19",
+                        time=="Euro area (18 countries)"~"Euro-18", 
+                        time=="Germany (until 1990 former territory of the FRG)"~"Germany", TRUE~time)) %>% 
+  rename(country=time) %>% 
+  clean_names()%>% 
+    filter(country!=c("European Union","Euro-19","Euro-18"))%>% 
+  mutate(across(x2005:x2018, as.numeric)) %>% 
+  filter(country!="France") 
+
+data_cart$country[ data_cart$country == "France (metropolitan)" ] <- "France"
+
+data_pivoted<-data_cart%>% 
+  pivot_longer(-country,
+                        names_to="year",values_to="gap") %>% 
+  mutate(year=as.numeric(str_extract(year, "\\d+"))) 
+
+top_10<-data_pivoted %>% 
+  filter(year==max(year)) %>% 
+  slice_max(order_by = gap,n=10)
+  
+data_pivoted %>% 
+  ggplot()+
+  geom_line(aes(x=year,y=gap, group=country), alpha=0.5)+
+  geom_text_repel(aes(label=country, x=2018, y=gap, color=country), data=top_10)+
+  geom_line(aes(x=year,y=gap, color=country), data=data_pivoted %>% filter(country %in% top_10$country)) + theme(legend.position="none")
+```
+
+# Part 2
+
+Highlight only France
+
+```{r}
+
+data_france <- data_pivoted %>% 
+  select(year, gap, country) %>% 
+  filter(country == "France")
+
+data_pivoted %>% 
+  ggplot()+
+  geom_line(aes(x=year,y=gap, group=country), alpha=0.1)+
+  geom_line(aes(x=year,y=gap), data=data_france, colour="blue") + 
+  theme(legend.position="none")+
+  labs(title="Gender employment gap in France and other EU countries",
+       subtitle="Annual difference between the employment rates of men and women aged 20-64",
+       caption = "Source: Eurostat",
+       y="Percentage of total population",x="year") 
+
+```
+
+# Part 3
+
+Plot the Gap data on a map
+
+```{r echo=FALSE}
+
+world <- st_read("data/ne_110m_admin_0_countries.shp") %>% 
+  clean_names()
+
+sf::sf_use_s2(FALSE)
+
+europe_cropped <- st_crop(world, xmin = -25, xmax = 50, ymin = 30, ymax = 73)
+
+# setdiff(
+#   data_2018 %>% pull(country),
+#   europe_cropped %>% pull(name_sort)
+# )
+
+
+europe_cropped <- europe_cropped %>% 
+  mutate(name_sort = case_when(name_sort == "Macedonia, FYR" ~ "North Macedonia",
+         name_sort=="Slovak Republic" ~ "Slovakia",
+         TRUE ~ as.character(name_sort)))
+
+europe_map<-europe_cropped
+
+data_2018<-data_pivoted %>% 
+  filter(year==max(year)) %>% 
+  mutate(year=NULL)
+
+
+
+data_Q3 <-europe_cropped  %>%
+  left_join(data_2018, c("name_sort"="country")) %>% 
+  rename(country=name_sort) 
+
+ggplot() + 
+coord_sf()+ ## Dont know how to give arguments to coord_sf
+  geom_sf(data = data_Q3,
+                    aes(fill = gap))+theme_void()+
+  labs(title="Gender employment gap in EU",
+       subtitle="Annual difference between the employment rates of men and women aged 20-64",
+       caption = "Source: Eurostat") 
+
+```
+
+# Part 4
+
+Plotting by dividing the continuos variable Gap into categories
+
+```{r}
+
+data_Q4<-data_Q3 
+
+quantile_vec <- data_Q4 %>%
+  pull(gap) %>%
+  quantile(probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE) %>% 
+  round(digits = 0)
+
+data_Q4 <- data_Q4 %>%
+  mutate(quantiles = cut(gap, breaks = quantile_vec, include.lowest = TRUE), digits=0)
+
+ggplot() +
+  geom_sf(
+    data = data_Q4,
+    mapping = aes(fill = quantiles)
+  ) +
+scale_fill_brewer(palette = "YlOrRd", na.value = "grey50") +
+  theme_void()+
+  labs(title="Gender employment gap in EU",
+       subtitle="Annual difference between the employment rates of men and women aged 20-64",
+       caption = "Source: Eurostat")
+
+```
+
+# Part 5
+
+Annotation of gender employment gap on top of each country
+
+```{r}
+
+library(ggrepel)
+
+data_Q5<-data_Q4 %>%
+  group_by(country) %>% 
+  summarise(mean_gap = mean(gap, na.rm = TRUE)) %>% 
+  arrange(desc(mean_gap)) %>% 
+  mutate(mean_gap=round(mean_gap,digits=0))
+  
+ quantile_vec_Q5 <- data_Q5 %>%
+  pull(mean_gap) %>%
+  quantile(probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+
+data_Q5 <- data_Q5 %>%
+  mutate(quantiles = cut(mean_gap, breaks = quantile_vec_Q5, include.lowest = TRUE))
+
+ggplot(data = data_Q5) +
+  geom_sf(mapping = aes(fill = quantiles)) +
+  geom_sf_text(aes(label=mean_gap), colour="white", size=3)+
+  scale_fill_brewer(palette = "YlOrRd", na.value = "grey50") +
+  theme_void()+
+  labs(title="Gender employment gap in EU",
+       subtitle="Annual difference between the employment rates of men and women aged 20-64",
+       caption = "Source: Eurostat")
+
+# Question: mean gap values plotted on geom_sf object is not correct
+
+```
+
+# Part 6
+
+Time series of gender employment gap changed over the years in the different countries
+
+```{r}
+
+data_Q6<-data_pivoted %>% 
+  filter(year %in% c("2014","2018"))
+
+data_Q6<-europe_cropped  %>%
+  left_join(data_Q6, c("name_sort"="country")) %>% 
+   drop_na(year) %>% 
+  rename(country=name_sort) 
+
+quantile_vec_Q6 <- data_Q6 %>%
+  select(year, gap) %>% 
+  drop_na() %>% 
+  pull(gap) %>%
+  quantile(probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)%>% 
+  round(digits = 0)
+
+data_Q6 <- data_Q6 %>%
+  mutate(quantiles = cut(gap, breaks = quantile_vec_Q6, na.rm = TRUE))
+
+ggplot(data = data_Q6, na.rm = TRUE) +
+  geom_sf(mapping = aes(fill = quantiles)) +
+  # use the blue colour scale, and set the na.value to grey
+  scale_fill_brewer(palette = "OrRd", na.value = "grey50") +
+  # facet by year
+  facet_wrap(vars(year), ncol = 2) +
+  # change theme
+  theme_void() +
+  # change the position and title of the legend
+  guides(fill = guide_legend(label.position = "bottom")) +
+  # add labels+
+  labs(title="Gender employment gap in EU",
+       subtitle="Difference between 2014 and 2018",
+       caption = "Source: Eurostat")
+
+### Unable to remove NA column
+  
+```
+
+# Part 7
+
+Difference between Gap for different countries
+
+```{r}
+
+library(ggrepel)
+
+data_Q7<-data_Q6 %>%
+  select(year,gap,country) %>% 
+  select(-geometry) %>% 
+  drop_na() %>% 
+  pivot_wider( names_from="year", values_from="gap")
+
+ quantile_vec_Q5 <- data_Q5 %>%
+  pull(mean_gap) %>%
+  quantile(probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)
+
+data_Q5 <- data_Q5 %>%
+  mutate(quantiles = cut(mean_gap, breaks = quantile_vec_Q5, include.lowest = TRUE))
+
+ggplot(data = data_Q5) +
+  geom_sf(mapping = aes(fill = quantiles)) +
+  geom_sf_text(aes(label=mean_gap), colour="white", size=2)+
+  scale_fill_brewer(palette = "YlOrRd", na.value = "grey50") +
+  theme_void()+
+  labs(title="Gender employment gap in EU",
+       subtitle="Annual difference between the employment rates of men and women aged 20-64",
+       caption = "Source: Eurostat")
+
+# mean_Gap values plotted on geom_sf object is not correct
+
+```
+
+# Part 8
+
+Different kind of projection
+
+```{r}
+
+library(ggrepel)
+
+world_robin_1 <-
+  st_transform(data_Q3 ,
+    crs =
+      "+proj=robin +lon_0=0 +x_0=0 +y_0=0
+               +datum=WGS84 +units=m +no_defs"
+  )
+
+quantile_vec_Q3 <- world_robin_1 %>%
+  select(gdp_year, gap) %>% 
+  drop_na() %>% 
+  pull(gap) %>%
+  quantile(probs = c(0, 0.25, 0.5, 0.75, 1), na.rm = TRUE)%>% 
+  round(digits = 0)
+
+world_robin_1 <- world_robin_1 %>%
+  mutate(quantiles = cut(gap, breaks = quantile_vec_Q3, include.lowest = TRUE))
+
+ggplot() +
+  geom_sf(data = world_robin_1, aes(fill = quantiles)) +
+  guides(fill = guide_legend(label.position = "bottom")) +
+  # then we remove the grids
+  theme_void() +
+  theme(legend.position = "bottom") +
+  labs(
+    title = "Per Capita Gross Domestic Product in 2018 (another kind of projection)",
+    fill = "",
+    subtitle = "By country",
+    caption = "Source: World Bank"
+  )
+
+```
+
+# Part 9
+
+European countries with difference in employment gap rates
+
+```{r}
+
+data_Q9<-data_Q3 %>% 
+  select(gap, country) %>% 
+  drop_na()
+
+top_5<-data_Q9 %>% 
+  slice_max(order_by = gap, n=5) %>% 
+  pull(country)
+
+bottom_5<-data_Q9 %>% 
+  slice_min(order_by = gap, n=5) %>% 
+  pull(country)
+
+data_Q9_per<-data_pivoted %>% 
+  group_by(country) %>% 
+  mutate(diff=(max(gap)-min(gap))) %>% 
+  mutate(diff_percentage=(max(gap)-min(gap))/max(gap)) %>% 
+  distinct(country, diff_percentage) %>% 
+  ungroup() %>%   
+  slice_max(order_by = diff_percentage, n=5) %>% 
+  pull(country)
+
+# All 30 countries are pulled out for the difference in percenatge
+```
+
+Top five countries with highest gender employment gap rate in Europe are: `r top_5`. \
+&nbsp;
+
+Top five countries with lowest gender employment gap rate in Europe are: `r bottom_5`. \
+&nbsp;
+
+Top five countries with employment gap decreased the most in percentage points in Europe are: `r data_Q9_per`. 
+
+

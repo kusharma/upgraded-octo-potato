@@ -1,0 +1,229 @@
+---
+title: "Report 4: Chart Make Over"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(readxl)
+library(tibble)
+library(ggplot2)
+library(dplyr)
+library(forcats)
+library(colourpicker)
+library(plotrix)
+#vignette("colourpicker")
+```
+
+# Part 1 
+
+2019 edition of the pie chart
+
+```{r}
+
+data2019 <- tibble::tribble(
+  ~category, ~price,
+  "Admin", 3.77,
+  "Economy", 4.08,
+  "Finance/taxes", 5.47,
+  "Social", 28.5,
+  "Security", 7.6,
+  "Autotraffic", 4.09,
+  "Health", 14.78,
+  "Education", 28.92,
+  "Environment", 1.19,
+  "Culture", 1.6
+  )
+desired_levels<- data2019 %>% 
+  pull(category) %>% 
+  as.factor()
+  #fct_inorder()
+
+my_palette<-c("#5EF8BE",
+"#54DDA9",
+"#4AC394",
+"#40AA80",
+"#36926D",
+"#2D7A5A",
+"#236348",
+"#1A4D37",
+"#113827",
+"#FFFFFF")
+
+data2019 %>% 
+  mutate(category = fct_inorder(category)) %>% 
+ggplot(mapping= aes(x="", y=price, fill=category)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) + 
+  scale_fill_manual(values = my_palette)
+
+```
+
+# Part 2 
+
+Education, social and health spending highlighted in one color
+
+```{r}
+
+data_lumped_3categories<-  
+  fct_collapse(data2019$category,combined=c("Education", "Social", "Health"))
+
+dataQ2<-data2019 %>% 
+  group_by(category) %>% 
+  arrange(desc(price))
+
+### Questions in Part 2
+
+my_palette_Q2<-c("#FFFF00",
+"#FFFF00",
+"#FFFF00",
+"#CCFFFF",
+"#CCFFFF",
+"#CCFFFF",
+"#CCFFFF",
+"#CCFFFF",
+"#CCFFFF",
+"#CCFFFF")
+
+dataQ2 %>% 
+mutate(category = factor(category, levels = dataQ2$category)) %>% 
+ggplot(mapping= aes(x="", y=price, fill=category)) +
+  geom_bar(stat="identity", width=1) +
+  coord_polar("y", start=0) + 
+  scale_fill_manual(values = my_palette_Q2)
+
+# How to do this plot using colors defined factors (lump1 - A color, lump2 -B color)
+```
+
+# Part 3 
+
+Alternative ways to represent the data 
+
+```{r}
+dataQ3<-data2019 %>% 
+  group_by(category) %>% 
+  arrange(desc(price)) 
+
+dataQ3 %>% 
+  mutate(category = factor(category, levels = dataQ3$category)) %>% 
+  ggplot(mapping=aes(x=category, y=price, fill=category)) +
+  geom_bar(position = "dodge", stat = "identity")+ coord_flip()+
+  theme(legend.position = "none") +
+  labs (
+    title = "Comparison of money spending across different categories by Canton of Vaud",
+    subtitle = "Using colors to differentiate different categories",
+    caption = "Source: Tax brouchure 2019",
+    y = "Money spending per 100 CHF", x= "Categories"
+  )
+
+ggplot(data2019, aes(x = 1,y = price, fill = category)) +
+    geom_bar(stat="identity") + 
+    geom_text(aes(label = price), 
+        position = position_stack(vjust = 0.5))+
+  theme( axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+    labs (
+    title = "Comparison of money spending across different categories by Canton of Vaud",
+    subtitle = "Using colors to differentiate different categories",
+    caption = "Source: Tax brouchure 2019", 
+    y = "Money spending per 100 CHF", x= "Categories") 
+
+# Unable to remove background grid from the bar chart
+
+# Make the plot
+data<-data2019
+# Compute the cumulative percentages (top of each rectangle)
+data$ymax <- cumsum(data$price)
+
+# Compute the bottom of each rectangle
+data$ymin <- c(0, head(data$ymax, n=-1))
+
+# Compute label position
+data$labelPosition <- (data$ymax + data$ymin) / 2
+
+# Compute a good label
+data$label <- paste0(data$price)
+
+
+# Make the Donut plot
+ggplot(data, aes(ymax=ymax, ymin=ymin, xmax=4, xmin=3, fill=category)) +
+  geom_rect() +
+  geom_text( x=3.5, aes(y=labelPosition, label=label), size=4) + # x here controls label position (inner / outer)
+  scale_fill_brewer(palette = "BrBG") +
+  scale_color_brewer(palette = "BrBG") +
+  coord_polar(theta="y") +
+  xlim(c(-1, 4)) +
+  theme_void() 
+
+# Unable to increase the text size of the legend
+```
+
+
+# Part 4 
+
+Visualizations to focus on what has changed in public spending
+
+```{r}
+
+data2018 <- tibble::tribble(
+  ~category, ~price,
+  "Admin", 4.04,
+  "Economy", 4.80,
+  "Finance/taxes", 8.43,
+  "Social", 27.87,
+  "Security", 7.12,
+  "Autotraffic", 3.58,
+  "Health", 12.85,
+  "Education", 28.50,
+  "Environment", 1.16,
+  "Culture", 1.65
+  )
+
+data2017 <- tibble::tribble(
+  ~category, ~price,
+  "Admin", 4.27,
+  "Economy", 4.26,
+  "Finance/taxes", 4.80,
+  "Social", 27.55,
+  "Security", 7.49,
+  "Autotraffic", 4.47,
+  "Health", 15.26,
+  "Education", 28.97,
+  "Environment", 0.95,
+  "Culture", 1.98
+  )
+
+data201720182019<-left_join(data2017,data2018, by=c("category")) %>% 
+  left_join(data2019, by=c("category")) 
+
+colnames(data201720182019)<-c("category","2017","2018","2019")
+
+data_pivoted<-data201720182019 %>% 
+  pivot_longer(cols=c("2017","2018","2019"),
+               names_to = "year",
+               values_to = "percentage")
+
+data_pivoted %>% ggplot(mapping=aes(x=year, y=percentage, fill=year)) +
+  geom_bar(position = "dodge", stat = "identity") + facet_wrap(vars(category)) +
+  theme(legend.position = "none") +
+  labs (
+    title = "Comparison of money spending per 100 CHF by Canton of Vaud",
+    subtitle = "Using colors to differentiate money spending across years",
+    caption = "Source: Tax brouchure 2017-2019",
+    x = "Year",
+    y = "Money spending per 100 CHF"
+  )
+```
+
+Using the faceted bar chart , it looks money spending per year has decreased for categories: Administration and Culture. However for other categories such as Autotraffic, Economy, Education, Finance, Health and Security, the values have fluctuated for the intermediate year 2018.

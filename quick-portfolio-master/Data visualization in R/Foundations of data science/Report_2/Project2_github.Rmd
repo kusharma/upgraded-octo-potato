@@ -1,0 +1,433 @@
+---
+title: "Project 2"
+output:
+  github_document
+---
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+library(DBI) 
+library(dplyr) 
+library(lubridate)
+library(tidyverse)
+library(janitor)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(httr)
+library(purrr)
+library(magrittr)
+library(knitr)
+
+politicians_db <- dbConnect(RSQLite::SQLite(), "zh_politicians.db") 
+dbListTables(politicians_db)
+mandates_tbl <- tbl(politicians_db, "MANDATES") %>% as_tibble() %>% clean_names 
+addresses_tbl<-tbl(politicians_db, "ADDRESSES") %>% as_tibble() %>% clean_names
+persons_tbl<-tbl(politicians_db, "PERSONS") %>% as_tibble() %>% clean_names
+affiliations_tbl<-tbl(politicians_db, "AFFILIATIONS") %>% as_tibble() %>% clean_names
+
+```
+
+# Part 1
+
+Number of people with an active mandate changed over the years
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+
+MD_tbl_short <- mandates_tbl %>%
+  select(-mandate_start_day,
+         -mandate_start_month,
+         -mandate_end_day,
+         -mandate_end_month) %>%
+  mutate (mandate_end_year = as.numeric(ifelse (mandate_start_year > 1900 
+                                   & mandate_end_year == "0", "2019",mandate_end_year )))
+  
+AF_tbl_short<-affiliations_tbl%>% 
+  select(-affiliation_start_day,-affiliation_start_month,
+         -affiliation_end_day,-affiliation_end_month)
+
+#mandate_affiliation_left_tbl<-left_join(MD_tbl_short,AF_tbl_short, by=c("id","person_id"))
+mandate_affiliation_left_tbl<-left_join(MD_tbl_short,AF_tbl_short, by=c("id"))
+#mandate_affiliation_left_tbl<-left_join(MD_tbl_short,AF_tbl_short, by=c("person_id"))
+
+mandates_counted_years<-mandate_affiliation_left_tbl %>% 
+  filter(mandate_start_year>0,mandate_end_year>0) %>% 
+  mutate(active_year=map2(mandate_start_year,mandate_end_year-1,seq)) %>% 
+  group_by(assembly) %>% 
+  unnest_longer(col = active_year) %>% 
+  count(active_year) %>%
+  ungroup()
+  
+mandates_counted_years %>% drop_na() %>% 
+  ggplot(mapping=aes(x=active_year, 
+                     y=n)) + xlim(1800, 2020)+
+  geom_line(aes(group=assembly, color=assembly)) +
+  theme(legend.position="right", legend.box = "horizontal")+
+  labs (title = "Number of active mandates each year",
+        subtitle = "Using colors to differentiate assembly categories",
+        caption = "Source: Politicians data",
+        x = "Year",
+        y = "Total number of active mandates")
+
+```
+
+# Part 2
+
+Facet charts with one chart per assembly seperated for men and women
+
+```{r message=FALSE, warning=FALSE}
+
+mandates_counted_years_assembly_gender<-mandate_affiliation_left_tbl %>% 
+  left_join(persons_tbl, by=c("id"))%>% 
+  filter(mandate_start_year>0,mandate_end_year>0, !is.na(gender)) %>% 
+  mutate(active_year=map2(mandate_start_year,mandate_end_year-1,seq)) %>% 
+  group_by(gender,assembly) %>% 
+  unnest_longer(col = active_year) %>% 
+  count(active_year) %>%
+  ungroup(assembly)
+
+mandates_counted_years_assembly_gender %>% 
+  ggplot(mapping=aes(x=active_year, 
+                     y=n)) + xlim(1800, 2020)+
+   scale_size(range = c(8, 12))+
+  geom_line(aes(group=gender, color=gender)) +
+  facet_grid(vars(assembly)) +
+  theme(legend.position="right", legend.box = "horizontal")+
+  labs (title = "Number of active mandates each year",
+        subtitle = "Using colors to differentiate gender and facet grid for different assemblies",
+        caption = "Source: Politicians data",
+        x = "Year",
+        y = "Total number of active mandates")
+```
+
+# Part 3
+
+Proportion of elected politicians from each party in year 2000
+
+```{r message=FALSE, warning=FALSE}
+
+Elected_politician_2000<- mandate_affiliation_left_tbl%>%
+  filter(affiliation_start_year>0,affiliation_end_year>0, affiliation_end_year<2020) %>% 
+  select(id,assembly,party,affiliation_start_year,affiliation_end_year)%>%
+  mutate(affiliation_active_year=map2(affiliation_start_year,affiliation_end_year,seq)) %>% 
+  #group_by(party) %>% 
+  unnest_longer(col = affiliation_active_year) %>% 
+  group_by(affiliation_active_year,party) %>% 
+  ungroup(party) %>% 
+  filter(affiliation_start_year==2000)
+  
+
+Proportion_Elected_politician_2000<-Elected_politician_2000%>% 
+  group_by(assembly,party)%>%
+  summarise(n=n())%>%
+  mutate(proportion=n/sum(n))%>%
+  ungroup(party)
+
+Proportion_Elected_politician_2000 %>%
+  knitr::kable(caption = "proportion of elected politicians from each party in year 2000") %>%
+  kableExtra::kable_styling(
+    bootstrap_options = "striped",
+    full_width = F,
+    position = "left"
+  )
+
+ggplot(Proportion_Elected_politician_2000, aes(x="", y=proportion, fill=party)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar("y", start=0) +  facet_grid(facets=. ~ assembly)+
+  theme_void() +
+  labs (title = "proportion of elected politicians from each party in year 2000 ",
+        subtitle = "facets to differentiate assemblies",
+        caption = "Source: Politicians data")
+```
+
+# Part 4 
+
+Change in the composition of assemblies over the years
+
+```{r message=FALSE, warning=FALSE}
+
+Composition_assembly_party_by_year<- mandate_affiliation_left_tbl%>%
+  filter(affiliation_start_year>0,affiliation_end_year>0 & affiliation_end_year<2020) %>% 
+  select(id,assembly,party,affiliation_start_year,affiliation_end_year)%>%
+  mutate(affiliation_active_year=map2(affiliation_start_year,affiliation_end_year,seq)) %>% 
+  unnest_longer(col = affiliation_active_year) %>% 
+  group_by(assembly,affiliation_active_year, party) %>% 
+  summarise(n=n())%>%
+  mutate(proportion=n/sum(n))%>%
+  ungroup(affiliation_active_year, party)
+
+Composition_assembly_party_by_year %>% 
+  ggplot(mapping=aes(x=affiliation_active_year, 
+                     y=proportion)) + xlim(1980, 2020)+
+  geom_line(aes(group=party, color=party)) +
+  facet_grid(vars(assembly)) +
+  theme(legend.position="right")+
+  labs (title = "composition of assemblies across year",
+        subtitle = "Using colors to differentiate party and facet grid for assemblies",
+        caption = "Source: Politicians data",
+        x = "Year",
+        y = "Proportion of parties in an assembly")
+
+# Problem in placing legend box on right. The whole screen is covered by the legend box
+
+```
+
+# Part 5
+
+Polticians with year of death in the data
+
+```{r message=FALSE, warning=FALSE}
+
+Politicians_death<-persons_tbl%>%
+  arrange(desc(year_of_death))%>%
+  filter(year_of_death>=0,year_of_birth!=0) %>%
+  mutate(lifespan=as.numeric(year_of_death)-as.numeric(year_of_birth)) %>% 
+  filter(lifespan>5 & lifespan<120)
+
+Average_politicians_age<-Politicians_death%>%
+  select(title, lifespan)%>%
+  mutate(title = na_if(title, ""))%>%
+  mutate(is_title=ifelse(is.na(title),"no_title","with_title"))%>%
+  group_by(is_title)%>%
+  summarise(average_lifespan=mean(lifespan))%>%
+  ungroup()
+
+Politicians_death_table <- Politicians_death %>%
+  select(title, lifespan)%>%
+  mutate(title = na_if(title, ""))%>%
+  mutate(is_title=ifelse(is.na(title),"no_title","with_title")) %>% 
+  select(is_title, lifespan)
+
+Politicians_death_table %>%  
+  ggplot2::ggplot(mapping = aes( y = lifespan, x=is_title,group=is_title)) +
+  geom_boxplot(aes(colour=is_title))
+
+Politicians_death_table %>% 
+  select(is_title,lifespan) %>% 
+  infer::t_test( lifespan ~ is_title,
+                 order = c("no_title","with_title"),
+                 var.equal = FALSE)
+  
+```
+
+Using the box plot, it looks __lifepsan__ is higher for politicians with __with_title__ than __no_title__.
+ 
+After doing t-test on variable lifespan for for politicians with __with_title__ than __no_title__, it can be observed that two groups are not comparable (or not similar) for the variable __is_title__. This conclusion was deduced by looking at the box plot and also checking the p-value from the t-test which is less than 0.05.
+
+# Part 6 
+
+Polticians born before and after 1918
+
+```{r message=FALSE, warning=FALSE}
+
+Politicians_born_1918_title<-Politicians_death%>%
+  arrange(desc(year_of_birth))%>%
+  filter(year_of_birth!=0) %>% 
+  select(id, year_of_birth, title, lifespan) %>% 
+  mutate(title = na_if(title, ""))%>%
+  mutate(is_title=ifelse(is.na(title),"no_title","with_title")) %>% 
+  mutate(is_born=ifelse(year_of_birth<1918,"before_1918","after_1918"))%>% 
+  select(id, is_title, is_born, lifespan)
+
+Politician_1918_avg_lifespan<-Politicians_born_1918_title %>%
+  group_by(is_born,is_title)%>%
+  summarise(average_lifespan=mean(lifespan))
+
+# Filter data sets to make two data sets for t-test
+
+Politician_before_1918<-Politicians_born_1918_title %>%
+  filter(is_born=="before_1918")
+
+Politician_before_1918 %>%  
+  ggplot2::ggplot(mapping = aes( x=is_title,y = lifespan, group=is_title)) +
+  geom_boxplot(aes(colour=is_title)) + 
+  labs(title = "Politicians before 1918")
+
+Politician_before_1918 %>% select(is_title,lifespan) %>% 
+  infer::t_test( lifespan ~ is_title,
+                 order = c("no_title","with_title"),
+                 var.equal = TRUE)
+
+Politician_after_1918<-Politician_before_1918<-Politicians_born_1918_title %>%
+  filter(is_born=="after_1918")
+Politician_after_1918 %>%  
+  ggplot2::ggplot(mapping = aes( x=is_title,y = lifespan, group=is_title)) +
+  geom_boxplot(aes(colour=is_title))+ 
+  labs(title = "Politicians after 1918")
+
+Politician_after_1918 %>% select(is_title,lifespan) %>% 
+  infer::t_test( lifespan ~ is_title,
+                 order = c("no_title","with_title"),
+                 var.equal = TRUE)
+ 
+
+```
+ There is difference in lifespan for politicians borne before 1918 with and without title.
+ 
+ p-value looks quite significant for comparison of average lifespan for politician born before 1918 with and wihout title.
+
+p-value does not look significant for comparison of average lifespan for politician born after 1918 with and wihout title.
+
+
+# Part 7
+
+Most number of mandates by a politician
+
+```{r message=FALSE, warning=FALSE}
+
+politician_name<-persons_tbl %>% 
+  select(id, firstname, lastname) %>% 
+  mutate(fullname=str_c(firstname, lastname, sep=" "))
+
+number_mandates_by_politician<- mandate_affiliation_left_tbl%>%
+  full_join(politician_name, by=c("id")) %>% 
+  drop_na() %>% 
+  select(person_id.x,mandate_id,fullname) %>% 
+  group_by(person_id.x)%>%
+  mutate(number_mandates=n())%>%
+  ungroup(person_id.x)%>%
+  top_n(10)
+
+number_mandates_by_politician %>% 
+    knitr::kable(caption = "Most number of mandates by a politician") %>%
+    kableExtra::kable_styling(
+      bootstrap_options = "striped",
+      full_width = F,
+      position = "left"
+    )
+
+number_mandates_by_politician %>% 
+  ggplot(aes(y=as.character(fullname), x=number_mandates))+
+  geom_bar(stat="identity")+ theme_minimal() +
+  labs (title = "Most number of mandates by a poltician",
+    x = "Number of mandates by a poltiician",
+    y = "Poltician name") 
+ 
+```
+
+# Part 8
+
+Politicians associated with multiple mandates at the same time
+
+```{r message=FALSE, warning=FALSE}
+
+politicians_multiple_mandates<-mandate_affiliation_left_tbl %>% 
+  filter(mandate_start_year>0,mandate_end_year>0) %>% 
+  mutate(active_year=map2(mandate_start_year,mandate_end_year,seq)) %>% 
+  group_by(person_id.x) %>% 
+  unnest_longer(col = active_year) %>% 
+  #mutate(number_of_mandates=n()) %>% 
+  count(active_year)%>%
+  ungroup()
+
+count_politicians_multiple_mandates<-politicians_multiple_mandates %>% 
+  group_by(n,active_year) %>% 
+  #mutate(total_number_politician_with_n_number_of_mandates=count("number_of_mandates")) %>% 
+  count("politician with n number of mandates") %>%
+  filter(n>1) %>% 
+  ungroup(active_year)
+
+count_politicians_multiple_mandates %>% 
+    knitr::kable(caption = "Politician with n number of mandates") %>%
+    kableExtra::kable_styling(
+      bootstrap_options = "striped",
+      full_width = F,
+      position = "left"
+    )
+
+count_politicians_multiple_mandates %>% 
+  ggplot(mapping=aes(x=active_year, 
+                     y=nn))+ ylim(1,20 ) +
+  geom_line(aes(group=nn, color=nn)) +
+  facet_grid(vars(n)) +
+  theme(legend.position="none")+
+  labs (title = "Total number of politicians with multiple mandates",
+        subtitle = "Using facets for n number of mandates",
+        caption = "Source: Politicians data",
+        x = "Year",
+        y = "Total number of policians with n number of mandates")
+```
+
+# Part 9
+
+Politicians associated with different parties
+
+```{r message=FALSE, warning=FALSE}
+
+Policitian_party<-mandate_affiliation_left_tbl%>%
+  select(id, person_id.x,party)%>%
+  group_by(person_id.x)%>%
+  mutate(number_of_party=n_distinct(party)) %>% 
+  arrange(desc(number_of_party)) %>% 
+  ungroup() %>% 
+  top_n(4)
+
+
+Policitian_party_table<-Policitian_party %>% 
+  kable()
+
+```
+
+Politicians associated with different parties are: `r Policitian_party_table`.
+
+# Part 10 
+
+Leaflet and ggmap for addresses of politicians
+
+```{r message=TRUE, warning=FALSE, paged.print=FALSE}
+
+library(dplyr)
+library(purrr)
+library(magrittr)
+
+politician_address<-addresses_tbl%>%
+                  select(id, person_id,street, house_number, city, postal_code)%>%
+                  mutate_all(na_if,"") %>% 
+                  dplyr::filter(complete.cases(.)) 
+
+
+politician_address_20<-politician_address %>% 
+                    mutate(full_address=str_c(street, house_number, postal_code, city, sep=",")) %>% 
+                    mutate(postal_code=as.numeric(str_extract(politician_address$postal_code, "\\d+"))) %>% 
+                    mutate(house_number=as.numeric(str_extract(politician_address$house_number, "\\d+"))) %>%
+                    mutate(street=str_extract(politician_address$street, "\\w+")) %>%
+                    mutate(country="switzerland") %>% 
+                    mutate_all(na_if,"") %>% 
+                    dplyr::filter(complete.cases(.)) %>% 
+                    mutate(address_geocode=str_glue_data(politician_address,"{street}","{house_number}","{postal_code}","{city}","{country}", .sep="+")) %>% 
+                    top_n(30)
+
+slowGET <- function( url ) {
+  Sys.sleep(0.5)
+  print( url )
+  return ( GET(url) )
+}
+
+latitude_longitude <-str_glue("https://geocode.xyz/",
+                              "{politician_address_20$address_geocode}",
+                              "?json=1") %>% 
+  map(GET) %>%
+  keep(~ status_code(.) == 200) %>% 
+  map(content)
+  
+
+latitude_longitude_extract<-latitude_longitude %>%
+ purrr::map_df(magrittr::extract, c("latt", "longt")) %>% 
+ mutate(latt=as.numeric(latt),longt=as.numeric(longt))
+
+# I have commented the leaflet code below
+
+#library(leaflet)
+#latitude_longitude_extract %>%
+#leaflet() %>% 
+#addTiles() %>% 
+#addMarkers(lng=~longt,lat=~latt)
+
+library(ggmap)
+switzerland_area <- c(left=8.363203, bottom=47.298988, right=8.722582, top=47.456508)
+switzerland_map <- get_stamenmap(bbox=switzerland_area)
+ggmap(switzerland_map) +
+  geom_point(data=latitude_longitude_extract , 
+             aes(x=longt, y=latt, alpha=.5))+
+  labs(title="Where are policiticians in Switzerland?",
+       subtitle="Geolocation of 20 listings from the politician data in Switzerland")
+```
