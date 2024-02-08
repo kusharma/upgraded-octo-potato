@@ -1,0 +1,491 @@
+---
+title: 'Project1: Time Series'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(janitor)
+library(kableExtra)
+library(tidyr)
+library(slider)
+library(ggpomological)
+library(patchwork)
+
+```
+
+# Part1: Import the data
+
+```{r}
+
+cheese_data <- read_csv("Data/cheese_data.csv")
+cheese_data_f1<-cheese_data %>% 
+  filter(factory=="f1")
+cheese_data_f2<-cheese_data %>% 
+  filter(factory=="f2")
+```
+
+# Part2: Clean the data (manage missing values)
+
+```{r}
+
+cheese_data_f1_filtered<-cheese_data_f1 %>% 
+  mutate_all(na_if, 0)
+
+cheese_data_f2_filtered<-cheese_data_f2 %>% 
+  mutate_all(na_if, 0)
+  
+count_missing_f1<-sum(is.na(cheese_data_f1_filtered))
+  
+count_missing_f2<-sum(is.na(cheese_data_f2_filtered))
+  
+dQ1_f1<-cheese_data_f1_filtered %>% 
+    mutate(across(m1:m5,is.na)) %>% 
+    mutate(total_na=m1+m2+m3+m4+m5) %>% 
+    filter(total_na>1) %>% 
+    dplyr::select(factory, week, timepoint)
+  
+dQ2_f1<-cheese_data_f1_filtered %>% 
+    anti_join(dQ1_f1)
+  
+dQ2_replaced_f1<-dQ2_f1 %>% 
+    pivot_longer(cols = m1:m5, names_to ="measurements", values_to ="value") %>% 
+    group_by(timepoint) %>% 
+    mutate(four_timepoint_mean = sum(value, na.rm = TRUE)/4) %>%
+    mutate(value=if_else(is.na(value), four_timepoint_mean, value)) %>% 
+    dplyr::select(-four_timepoint_mean)
+
+dQ1_f2<-cheese_data_f2_filtered %>% 
+    mutate(across(m1:m5,is.na)) %>% 
+    mutate(total_na=m1+m2+m3+m4+m5) %>% 
+    filter(total_na>1) %>% 
+    dplyr::select(factory, week, timepoint)
+  
+dQ2_f2<-cheese_data_f2_filtered %>% 
+    anti_join(dQ1_f1)
+  
+dQ2_replaced_f2<-dQ2_f2 %>% 
+    pivot_longer(cols = m1:m5, names_to ="measurements", values_to ="value") %>% 
+    group_by(timepoint) %>% 
+    mutate(four_timepoint_mean = sum(value, na.rm = TRUE)/4) %>%
+    mutate(value=if_else(is.na(value), four_timepoint_mean, value)) %>% 
+    dplyr::select(-four_timepoint_mean)
+
+count_timepointmissing_f1<-dQ1_f1 %>% 
+  count()
+
+count_timepointmissing_f2<-dQ1_f2 %>% 
+  count()
+  
+```
+
+There are `r count_missing_f1` missing values for data in factory f1 and `r count_missing_f2` missing values for data in factory f2.
+
+There are `r count_timepointmissing_f1` missing timepoint values for data in factory f1 and `r count_timepointmissing_f2` missing timepoint values for data in factory f2.
+
+# Part3: Manage unexpected values
+
+```{r}
+  
+dQ3_expected_f1<-dQ2_replaced_f1 %>%
+  filter(between(value, 15, 65))
+
+dQ3_f1_unexpected<-dQ2_replaced_f1 %>% 
+    anti_join(dQ3_expected_f1) %>% 
+    nrow()
+  
+
+dQ3_expected_f2<-dQ2_replaced_f2 %>%
+  filter(between(value, 15, 65))
+
+dQ3_f2_unexpected<-dQ2_replaced_f2 %>% 
+    anti_join(dQ3_expected_f2) %>% 
+  nrow()
+  
+
+```
+  
+The unexpected or suspicious values are:\ \
+`r dQ3_f1_unexpected` unexpected values for data in factory f1 and `r dQ3_f2_unexpected` unexpected values for data in factory f2.  We removed `r dQ3_f1_unexpected` unexpected values for data in factory f1 for later on analysis.
+
+# Part4: Compute monitoring statistics for factory f1
+
+```{r}
+  
+spc_data_f1<-dQ3_expected_f1 %>% 
+  dplyr::select(-factory) %>% 
+  group_by(timepoint,week) %>% 
+  summarise(xbar=mean(value),
+         Range=max(value)-min(value)) 
+
+spc_data_f1_table<-spc_data_f1 %>% 
+  ungroup() %>% 
+  slice_max(n=10, order_by = week) %>% 
+  kbl() %>%
+  kable_styling()
+  
+
+number_row_spc_data_f1<-spc_data_f1 %>% 
+  nrow()
+
+spc_data_f1_average_xbar_range <- spc_data_f1 %>%
+  ungroup() %>% #group_by(week) %>%
+  summarise(Average_xbar = mean(xbar),
+         Average_Range = mean(Range))
+   
+
+
+```
+
+Statistics table for SPC values for factory f1 is:  `r spc_data_f1_table`
+There are `r number_row_spc_data_f1` number  of rows in factory f1.\
+\
+Average across xbar and Range for factory f1 are:  `r spc_data_f1_average_xbar_range`
+
+# Part5: Build Shewhart control charts for factory f1
+
+```{r}
+
+XbarR_constants_week_n5 <- read_csv("Data/XbarR_constants.csv") %>% 
+  filter(n==5)
+
+dQ5 <- spc_data_f1_average_xbar_range  %>%
+  mutate(
+    LCL = Average_Range * XbarR_constants_week_n5$D3,
+    UCL = Average_Range * XbarR_constants_week_n5$D4
+  )
+
+shewhart_factory_f1_Rchart_part5<-ggplot(data=spc_data_f1, aes(x=timepoint)) +
+geom_line(color="red", aes(x=timepoint, y=dQ5$LCL))+
+geom_line(color="red", aes(x=timepoint, y=dQ5$UCL))+
+geom_point(color="darkred", aes(y=Range))+
+geom_line(data=spc_data_f1, color="black", aes(y=Range),linetype="dotted")+
+  labs(title = "Lineplot of Range vs Timepoint for factory f1", 
+       subtitle = "LCL and UCL values in red and average range value in black",
+       y="Range values",x="Timepoint")+ 
+  ggthemes::theme_economist_white(base_size = 11, base_family = "sans",
+  gray_bg = TRUE, horizontal = TRUE)
+ 
+
+
+dQ5_xbar<-spc_data_f1_average_xbar_range   %>% 
+  mutate(LCL=Average_xbar-Average_Range*XbarR_constants_week_n5$A2,
+         UCL=Average_xbar+Average_Range*XbarR_constants_week_n5$A2)
+
+shewhart_factory_f1_xbarchart_part5<-ggplot(data=spc_data_f1, aes(x=timepoint)) +
+  geom_line(color="black", aes(y=xbar),linetype="dotted")+
+  geom_line(color="red", aes(x=timepoint, y=dQ5_xbar$LCL))+
+  geom_line(color="red", aes(x=timepoint, y=dQ5_xbar$UCL))+
+  geom_point(color="darkred", aes(y=xbar))+
+  labs(title = "Lineplot of Average xbar vs Timepoint for factory f1", 
+       subtitle = "LCL and UCL values in red and average xbar value in black",
+       y="Xbar value",x="Timepoint") + 
+  ggthemes::theme_economist_white(base_size = 11, base_family = "sans",
+  gray_bg = TRUE, horizontal = TRUE)
+
+```
+
+```{r}
+
+shewhart_factory_f1_Rchart_part5
+
+```
+\ 
+\ 
+
+The R chart for range values for factory f1 shows all values within LCL and UCL.
+
+```{r}
+
+shewhart_factory_f1_xbarchart_part5
+
+```
+
+\ 
+\ 
+The Xbar chart for factory f1 shows few values outside LCL and UCL.
+
+# Part6: Highlight special causes of variations
+
+```{r}
+
+vec<-spc_data_f1 %>% 
+  pull(xbar)
+
+mean_observed<-mean(vec)
+
+highlight<-spc_data_f1 %>% 
+  ungroup() %>% 
+  mutate(is_between=between(xbar,dQ5_xbar$LCL,dQ5_xbar$UCL),
+         slide_above_below=case_when(
+           xbar>=mean_observed ~ 1,
+           xbar<mean_observed ~ -1
+         ),
+       moving_ten_sum= abs(slide_sum(x = slide_above_below,  before = 10L, step=1L)),
+       highlight_true=if_else(moving_ten_sum>10, TRUE, FALSE), 
+       colour_def= case_when(
+         highlight_true==TRUE ~ 'blue',
+         xbar=!between(xbar, dQ5_xbar$LCL, dQ5_xbar$UCL) ~ 'blue',
+        TRUE ~ 'black'
+       ))
+
+
+highlight %>% 
+ggplot(aes(x=timepoint, y=xbar)) +
+  geom_line(aes(y=xbar ), linetype="dotted")+
+  geom_point(aes(y=xbar, color=colour_def))+
+  geom_line(color="black", aes(x=timepoint, y=dQ5_xbar$LCL))+
+  geom_line(color="black", aes(x=timepoint, y=dQ5_xbar$UCL))+
+  labs(title = "Lineplot of Average xbar vs Timepoint for factory f1", 
+       subtitle = "LCL and UCL values in black, average xbar value in red, outliers in blue",
+       y="Xbar value",x="Timepoint") + 
+  ggthemes::theme_economist_white(base_size = 11, base_family = "sans",
+  gray_bg = TRUE, horizontal = TRUE)+
+  theme(legend.position = "none" )
+
+        
+```
+\
+\ Looking at measurements from factory f1, there are 2 outliers (beyond control limits) and one instance of consecutive ten points on one side of the centerline.
+
+# Part7: Build Shewhart control charts for factory f2
+
+```{r}
+
+spc_data_f2 <- dQ3_expected_f2 %>%
+  dplyr::select(-factory) %>%
+  group_by(timepoint, week) %>%
+  summarise(xbar = mean(value),
+            Range = max(value) - min(value)) %>%
+  ungroup()
+
+spc_data_f2_average_xbar_range <- spc_data_f2 %>%
+  summarise(Average_xbar = mean(xbar),
+         Average_Range = mean(Range))
+
+
+dQ7<-spc_data_f2_average_xbar_range  %>% 
+  mutate(LCL=Average_Range*XbarR_constants_week_n5$D3,
+         UCL=Average_Range*XbarR_constants_week_n5$D4)
+
+
+vec_dQ7<-spc_data_f2 %>% 
+  pull(xbar)
+
+mean_observed_dQ7<-mean(vec_dQ7)
+
+dQ7_xbar<-spc_data_f2_average_xbar_range   %>% 
+  mutate(LCL=Average_xbar-Average_Range*XbarR_constants_week_n5$A2,
+         UCL=Average_xbar+Average_Range*XbarR_constants_week_n5$A2)
+
+highlight_dQ7<-spc_data_f2 %>% 
+  ungroup() %>% 
+  mutate(is_between=between(xbar,dQ7_xbar$LCL,dQ7_xbar$UCL),
+         slide_above_below=case_when(
+           xbar>=mean_observed_dQ7 ~ 1,
+           xbar<mean_observed_dQ7 ~ -1
+         ),
+       moving_ten_sum= abs(slide_sum(x = slide_above_below,  before = 10L, step=1L)),
+       highlight_true=if_else(moving_ten_sum>10, TRUE, FALSE), 
+       colour_def= case_when(
+         highlight_true==TRUE ~ 'blue',
+         xbar=!between(xbar, dQ7_xbar$LCL, dQ7_xbar$UCL) ~ 'blue',
+        TRUE ~ 'black'
+       ))
+
+highlight_dQ7 %>% 
+ggplot(aes(x=timepoint, y=xbar)) +
+  geom_line(aes(y=xbar ), linetype="dotted")+
+  geom_point(aes(y=xbar, color=colour_def))+
+  geom_line(color="black", aes(x=timepoint, y=dQ7_xbar$LCL))+
+  geom_line(color="black", aes(x=timepoint, y=dQ7_xbar$UCL))+
+  labs(title = "Lineplot of Average xbar vs Timepoint for factory f2", 
+       subtitle = "LCL and UCL values in black, average xbar value in red, outliers in blue",
+       y="Xbar value",x="Timepoint") + 
+  ggthemes::theme_economist_white(base_size = 11, base_family = "sans",
+  gray_bg = TRUE, horizontal = TRUE)+
+  theme(legend.position = "none" )
+
+```
+
+\
+\ Looking at measurements from factory f2, there are multiple outliers (beyond control limits) and multiple instances of consecutive ten points on one side of the centerline.
+
+```{r}
+
+  plot1<-ggplot(data = spc_data_f1, aes(x= week, y= xbar))+
+    geom_point() + ylim(50, 53)+
+  labs(title = "factory f1",
+       y="Xbar value",x="week") + ggthemes::theme_fivethirtyeight()
+
+   plot2<-ggplot(data = spc_data_f2, aes(x= week, y= xbar))+
+    geom_point() +ylim(50, 53)+
+  labs(title = "factory f2", 
+       y="Xbar value",x="week") + ggthemes::theme_fivethirtyeight()
+
+plot1 + plot2 + 
+  plot_layout(ncol = 2)+ plot_annotation(
+  title = 'Factory f2 has more variations in xbar values',
+  subtitle = 'Scatter plot of xbar (y-axis) vs week values (x-axis)'
+)
+  
+
+```
+
+
+Factory 2 has more variations in value compared to factory f1. There seems to be some sort of systemic bias in measurements from factory f2.
+
+# Part8: Redefining montoring data for factory f2
+
+```{r}
+
+pacman::p_load(
+  tidyverse,      # for data management and viz
+  slider,         # for calculating moving averages
+  tidyquant       # for calculating moving averages within ggplot
+)
+
+dQ8<-spc_data_f2 %>%
+  group_by(week) %>%
+  summarise(Average_Range=mean(Range, na.rm=T)) %>% 
+   mutate(                                
+    MR_bar = slide_dbl(
+      Average_Range,                        
+      .f = ~mean(.x, na.rm = T),         
+      .before = 1))
+    
+  dQ8<-dQ8 %>% 
+    mutate(Average_Average_Range=mean(Average_Range),
+           LCL= Average_Average_Range-2.66*MR_bar,
+         UCL=  Average_Average_Range+2.66*MR_bar)
+
+dQ8_plot1<-ggplot(data=dQ8, aes(x=week)) +
+  geom_line(color="black", aes(y=Average_Range),linetype="dotted")+
+  geom_line(color="red", aes(y=LCL))+
+  geom_line(color="red", aes(y=UCL))+
+  labs(title = "Lineplot of Range vs Timepoint (by week) for factory f2", 
+       subtitle = "LCL and UCL values in red and average range value in black",
+       y="Range values",x="week") 
+
+dQ8_xbar<-spc_data_f2 %>%
+  group_by(week) %>%
+  summarise(Average_xbar=mean(xbar, na.rm=T)) %>% 
+  ungroup() %>% 
+  mutate(prev = lag(Average_xbar, 1)) %>% 
+  mutate(MR_bar = abs(Average_xbar - prev))
+
+
+dQ8_xbar<-dQ8_xbar %>% 
+    mutate(Average_Average_xbar=mean(Average_xbar),
+           LCL = Average_Average_xbar-2.66*mean(MR_bar, na.rm = TRUE),
+    UCL = Average_Average_xbar+2.66*mean(MR_bar, na.rm = TRUE))
+
+dQ8_plot2<-ggplot(data=dQ8_xbar, aes(x=week)) +
+  geom_line(color="black", aes(y=Average_xbar),linetype="dotted")+
+  geom_line(color="red", aes(y=LCL))+
+  geom_line(color="red", aes(y=UCL))+
+  geom_point(color="darkred", aes(y=Average_xbar))+
+  labs(title = "Lineplot of xbar  vs Timepoint (by week) for factory f2", 
+       subtitle = "LCL and UCL values in red and average range value in black",
+       y="xbar values",x="week") 
+
+```
+
+```{r}
+
+#dQ8_plot1
+
+```
+
+
+```{r}
+
+dQ8_plot2
+
+```
+\
+\ Looking at measurements from factory f2, average xbar value is within LCL and UCL
+
+# Part9: Time series data looking at milk quality across months
+
+```{r}
+
+library(lubridate)
+
+daily_milkdata_cow<- read_csv("Data/daily_milk.csv") %>% 
+  mutate(date_time=date(date_time)) %>% 
+  mutate(day_number=difftime(date_time, ymd("1975-01-01"), unit = "days"),
+         week_number=ceiling(difftime(date_time, ymd("1975-01-01"), unit = "week")),
+         timepoint= 1:n()) %>% 
+  dplyr::relocate(timepoint, .before=date_time) %>% 
+  group_by(day_number,week_number) %>% 
+  summarise(xbar=mean(milk_prod_per_cow_kg),
+         Range=max(milk_prod_per_cow_kg)-min(milk_prod_per_cow_kg)) 
+
+XbarR_constants_week_Q9 <- read_csv("Data/XbarR_constants.csv") %>% 
+  filter(n==2)
+
+daily_milkdata_average_xbar_range <- daily_milkdata_cow %>%
+  ungroup() %>% 
+  dplyr::group_by(week_number) %>%
+  mutate(Average_xbar = mean(xbar),
+         Average_Range = mean(Range))
+   
+dQ9<- daily_milkdata_average_xbar_range%>%
+  mutate(
+    LCL = Average_Range * XbarR_constants_week_Q9$D3,
+    UCL = Average_Range * XbarR_constants_week_Q9$D4
+  )
+
+plot_Q9_1st<-ggplot(data=daily_milkdata_cow, aes(x=day_number)) +
+geom_line(color="red", aes(x=day_number, y=dQ9$LCL))+
+geom_line(color="red", aes(x=day_number, y=dQ9$UCL))+
+geom_point(color="black", aes(y=Range))+
+geom_line(data=daily_milkdata_cow, color="black", aes(y=Range),linetype="dotted")+
+  labs(title = "Lineplot of Range vs Timepoint for milk", 
+       subtitle = "LCL and UCL values in red and average range value in black",
+       y="Range value",x="Day number")+ 
+  ggthemes::theme_economist_white(base_size = 11, base_family = "sans",
+  gray_bg = TRUE, horizontal = TRUE)
+ 
+
+dQ9_xbar<-daily_milkdata_average_xbar_range   %>% 
+  mutate(LCL=Average_xbar-Average_Range*XbarR_constants_week_Q9$A2,
+         UCL=Average_xbar+Average_Range*XbarR_constants_week_Q9$A2)
+
+plot_Q9_2nd<-ggplot(data=daily_milkdata_cow, aes(x=day_number)) +
+  geom_line(color="black", aes(y=xbar),linetype="dotted")+
+  geom_line(color="red", aes(x=day_number, y=dQ9_xbar$LCL))+
+  geom_line(color="red", aes(x=day_number, y=dQ9_xbar$UCL))+
+  geom_point(color="black", aes(y=xbar))+
+  labs(title = "Lineplot of Average xbar vs Timepoint for milk", 
+       subtitle = "LCL and UCL values in red and average xbar value in black",
+       y="Xbar value",x="Day number") + 
+  ggthemes::theme_economist_white(base_size = 11, base_family = "sans",
+  gray_bg = TRUE, horizontal = TRUE)
+
+```
+```{r}
+
+plot_Q9_1st
+
+```
+\
+\ Looking at measurements from milk produced by cow per kg, its seems that average range values are within the range of LCL and UCL
+
+```{r}
+
+plot_Q9_2nd
+
+```
+
+\
+\ Looking at measurements from milk produced by cow per kg, its seems that average Xbar values are within the range of LCL and UCL. Looks like our cows, hopefully swiss cows are consistent in producing milk quantity. 
+

@@ -1,0 +1,215 @@
+---
+title: 'Project2: Network data'
+output: 
+  html_document: 
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+# Part1: Getting the data
+
+```{r}
+
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(readtext)
+library(tidygraph)
+library(ggraph)
+library(igraph)
+library(kableExtra)
+
+movies<-readtext("Movies.paj")
+
+start_nodes<-str_locate(movies$text,"\\*Vertices")
+start_edge<-str_locate(movies$text,"\\*Edges")
+end_nodes<-str_locate(movies$text,"\\*Arcs")
+end_edge<-str_locate(movies$text,"\\*Partition")
+
+nodes_data<-movies$text %>%
+  str_sub(start=start_nodes[1], end = end_nodes[1]-1) %>%
+  read_table( skip=1, col_names = F) %>% 
+  map_df(str_trim) %>% 
+  mutate(X2=str_extract(X2,"\\w+" ),
+         X7=str_extract(X3,"[A-Z]++[\\. ]" ),
+         full_name=str_c(X7, X2, sep=" "))
+  
+
+edges_data<-movies$text %>%
+  str_sub(start=start_edge[1], end = end_edge[1]-1) %>%
+  read_table( skip=1, col_names = F) %>% 
+  rename(from=X1, to=X2)
+
+ movies_network<-tbl_graph(nodes=nodes_data, 
+                          edges = edges_data,
+                          directed = TRUE) %>% 
+   activate(nodes) %>%
+  filter(!node_is_isolated())
+
+movies_network %>% 
+  ggraph() + 
+  geom_edge_link(colour = 'grey') + 
+  geom_node_point(size = 2) +
+  theme_graph()
+
+movies_network_tibble<-movies_network %>% 
+  activate(edges) %>% 
+  as.tibble() 
+
+network_connections<-movies_network_tibble %>% 
+  nrow()
+
+producer_number<-movies_network_tibble%>% 
+  distinct(from) %>% 
+  nrow()
+
+composer_number<-movies_network_tibble%>% 
+  distinct(to) %>% 
+  nrow()
+
+```
+
+There are `r network_connections` number of connections between `r producer_number` producers and `r composer_number` consumers.
+
+# Part2: Graph with producers and composers
+
+```{r}
+
+from_vect<-movies_network%>% 
+  activate(edges) %>% 
+  pull(from) %>% 
+  unique()
+  
+movies_network<-movies_network %>% 
+  activate(nodes) %>% 
+  mutate(role=if_else(X1 %in% from_vect, "producer", "composer"))
+
+movies_network %>% 
+  ggraph() + 
+  geom_edge_link(colour = 'grey') + 
+  geom_node_point(aes(colour=role),size = 2) +
+  geom_node_text(aes(label = full_name), repel=TRUE)+theme_graph()
+```
+
+
+Let's look at most popular producers and what is the most number of composers that they have worked with `r network_connections` number of connections between `r producer_number` producers and `r composer_number` consumers. \ \
+
+Let's look at most popular producers and what is the most number of composers that they have worked with ?
+```{r}
+
+most_popular_producers<-movies_network_tibble%>% 
+  ungroup() %>% 
+  count(from,sort = TRUE,name="counted") %>% 
+  rename(producer_id =from) %>% 
+  slice_max(order_by=counted, n=5) %>%  
+  kbl() %>%
+  kable_styling()
+```
+`r most_popular_producers`
+
+Now Let's look at most popular composers in the next part...
+
+```{r}
+most_popular_composers<-movies_network_tibble %>% 
+  ungroup() %>% 
+  count(to,sort = TRUE,name="counted") %>% 
+  rename(composer_id =to) %>% 
+  slice_max(order_by=counted, n=5) %>% 
+  kbl() %>%
+  kable_styling()
+  
+```
+
+`r most_popular_composers`
+
+# Part3: Grouping the network by composers
+
+```{r}
+
+producers_edges <- edges_data %>%    #edges tibble
+  group_by(to) %>%    # grouping by composers
+  mutate(new_from = list(unique(from))) %>%   # cumulate all the unique froms this to is connected to 
+  unnest_longer(new_from) %>%    
+  filter(from != new_from) %>%    
+  ungroup() %>%    
+  select(to = from, from = new_from)
+
+
+nodes_data_filtered<-nodes_data %>% 
+  filter(X1 %in% c(producers_edges$to,producers_edges$from))
+
+producers_network<-tbl_graph(nodes=nodes_data_filtered, 
+                          edges = producers_edges,
+                          directed = FALSE)
+
+producers_network  %>% 
+  ggraph() + 
+  geom_edge_link(colour = 'grey') + 
+  geom_node_point(colour="red") +
+  geom_node_text(aes(label=X2, repel=TRUE), show.legend = NA)+theme_graph() +
+  labs (title= 'Which producers worked with the same composer',
+        caption='data collected from 1960s and 1970s in Hollywood')
+  # theme(legend.position = none)
+
+
+```
+
+
+# Part4: Clustering
+
+
+
+```{r}
+
+producers_network_clustered <-
+  producers_network %>%
+  activate(nodes) %>% 
+  mutate(group = group_leading_eigen())
+
+
+producers_network_clustered %>% 
+  mutate(group = as.factor(group)) %>% 
+  ggraph() + 
+  geom_edge_link(colour = "grey") + 
+  geom_node_point(aes(colour = group), size = 5) +
+  theme_graph()+
+  labs (title= 'Groups of producers working with the same composer',
+        subtitle='color represents different clusters of composers',
+        caption='data collected from 1960s and 1970s in Hollywood')
+
+```
+
+\
+\ All producers clustered into 3 groups of composers that they have worked with.
+
+# Part5: Touch this graph
+
+```{r}
+
+producers_network_clustered %>% 
+  mutate(group = as.factor(group)) %>% 
+  ggraph(layout='kk') + 
+  geom_edge_link(colour = "grey") + 
+  geom_node_point(aes(colour = group), size = 4) +
+  ggforce::geom_mark_hull(mapping = aes(x, y, group = group, fill = group),
+               concavity = 0.5,
+               expand = unit(4, 'mm'),
+               alpha = 0.25,
+               colour = 'white')+
+  rcartocolor::scale_fill_carto_d(palette = "Bold", guide = FALSE)+
+  theme_graph()+
+  labs (title= 'Groups of producers working with the same composer',
+        subtitle='color represents the area of different clustered groups',
+        caption='data collected from 1960s and 1970s in Hollywood')+ 
+  theme(legend.position="bottom")
+
+```
+\
+\ There is more density of connections between group1 and group2 of producers.

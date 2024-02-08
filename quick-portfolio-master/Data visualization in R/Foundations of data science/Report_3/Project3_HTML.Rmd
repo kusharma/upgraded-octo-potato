@@ -1,0 +1,217 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+library(stringr)
+library(httr)
+library(purrr)
+library(tidyr)
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(knitr)
+
+```
+
+# Part 1
+
+Getting access to "The Movie DB"
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+highest_gross_drama_2010 <-str_glue("https://api.themoviedb.org/3/",
+                                    "discover/movie",
+                                    "?api_key=55b3238346b11e88d118b5a647963747",
+                                    "&with_genres=18&primary_release_year=2010&sort_by=revenue.desc") %>% 
+  GET () %>% 
+  content () %>%
+  pluck("results") %>% 
+  purrr::map_df(magrittr::extract,c ("title")) %>% 
+  kable()
+
+                             
+actors_together<- str_glue("https://api.themoviedb.org/3/",
+                           "discover/movie",
+                           "?api_key=55b3238346b11e88d118b5a647963747",
+                           "&with_cast=23659&with_cast=3896&sort_by=popularity.desc") %>% 
+  GET() %>% 
+  content() %>%
+  pluck("results") %>% 
+  #map(pluck,"title") %>% 
+  purrr::map_df(magrittr::extract,c ("title")) %>% 
+  kable()
+  #map_df(extract, c("title"))  Not sure why map_df does not work
+
+tom_cruise_kidsmovies<- str_glue("https://api.themoviedb.org/3/",
+                                 "discover/movie",
+                                 "?api_key=55b3238346b11e88d118b5a647963747",
+                                 "&certification.lte=G&with_cast=500") %>% 
+  GET() %>% 
+  content() %>%
+  pluck("results") %>%   
+  purrr::map_df(magrittr::extract,c ("title")) %>% 
+  kable() 
+# map_df(extract, c("title"))
+```
+
+The highest grossing dramas from 2010 are :`r highest_gross_drama_2010`
+
+Movie with actors Ferrell and Liam Neeson are : `r actors_together`
+
+The kids movie done by Tom cruise are : `r tom_cruise_kidsmovies`
+
+# Part 2
+
+Extract id of the Pixar company
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+
+Pixar <- str_glue(
+  "https://api.themoviedb.org/3/",
+  "search/company",
+  "?api_key=55b3238346b11e88d118b5a647963747",
+  "&query=Pixar&page=1"
+) %>%
+  GET %>%
+  content %>%
+  pluck("results") %>%
+  purrr::map_df(magrittr::extract, c ("id", "name"))
+
+Pixar_id_found<-Pixar %>% 
+  filter(name=="Pixar") %>% 
+  kable()
+  
+
+Pixar_revenue_movies <- str_glue(
+  "https://api.themoviedb.org/3/",
+  "discover/movie",
+  "?api_key=55b3238346b11e88d118b5a647963747",
+  "&sort_by=revenue.desc&include_adult=false&include_video=false&page=1&with_companies=3"
+) %>%
+  GET() %>%
+  content() %>%
+  pluck("results") %>%
+  purrr::map_df(magrittr::extract, c ("original_title")) %>%
+  kable() 
+
+```
+
+Pixar id was found to be `r Pixar_id_found`.
+
+Pixar  movies sorted by descending revenue are :`r Pixar_revenue_movies`
+
+# Part 3
+ 
+Pixar movies sorted by descending revenue
+ 
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+pages<-as.character(seq(1,6,1))
+
+Pixar_revenue_movies_id <-str_glue("https://api.themoviedb.org/3/",
+                                   "discover/movie",
+                                   "?api_key=55b3238346b11e88d118b5a647963747",
+                                   "&sort_by=revenue.desc&include_adult=false&include_video=false&page={pages}&with_companies=3") %>% 
+  map(GET) %>% 
+  map(content)%>%
+  map(pluck, "results") %>% 
+  flatten() %>% 
+  map_df(magrittr::extract, c("original_title", "id")) %>% 
+  kable()
+
+```
+
+Pixar  movies sorted by descending revenue are :`r Pixar_revenue_movies_id`
+
+# Part 4
+
+Comparison of the popularity of both Disney and Pixar films that came out from 2006 onwards.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+ # Part 4
+ 
+Disney<- str_glue("https://api.themoviedb.org/3/",
+                  "search/company",
+                  "?api_key=55b3238346b11e88d118b5a647963747",
+                  "&query=Disney&page=1") %>% 
+  GET() %>% 
+  content() %>%
+  pluck("results") %>% 
+  map_df(magrittr::extract, c("name", "id")) 
+
+Disney_id_table<-Disney%>% 
+  kable()
+
+Disney_movies<- str_glue("https://api.themoviedb.org/3/",
+                         "discover/movie",
+                         "?api_key=55b3238346b11e88d118b5a647963747",
+                         "&include_adult=false&include_video=false&page={pages}&primary_release_year=>%3D2006&with_companies=2") %>% 
+  map(GET) %>% 
+  map(content)%>%
+  map(pluck, "results") %>% 
+  flatten() %>% 
+  map_df(magrittr::extract, c("original_title","release_date","vote_average", "vote_count","popularity"))
+
+Disney_movie_table<-Disney_movies %>% 
+  kable()
+
+Pixar_movies <- str_glue(
+  "https://api.themoviedb.org/3/",
+  "discover/movie",
+  "?api_key=55b3238346b11e88d118b5a647963747",
+  "&include_adult=false&include_video=false&page={pages}&primary_release_year=>%3D2006&with_companies=3"
+) %>%
+  map(GET) %>%
+  map(content) %>%
+  map(pluck, "results") %>%
+  flatten() %>%
+  map_df(
+    magrittr::extract,
+    c("original_title","release_date", "vote_average","vote_count","popularity")
+  ) 
+
+Pixar_movie_table<-Pixar_movies %>% 
+  kable()
+
+Pixar_filtered<-Pixar_movies %>%
+                mutate(company_name="Pixar") %>% 
+                filter(vote_count>=50)
+Disney_filtered<-Disney_movies %>%
+                mutate(company_name="Disney") %>% 
+                filter(vote_count>=50)
+Disney_Pixar<-bind_rows(Pixar_filtered,Disney_filtered)
+
+
+Disney_Pixar %>%
+  select(vote_average,popularity,company_name) %>% 
+  ggplot2::ggplot(mapping = aes(x = company_name, y = vote_average, group=company_name)) +
+  geom_boxplot(aes(colour=company_name))
+
+Disney_Pixar %>% 
+  select(vote_average,popularity,company_name) %>%
+  ggplot(mapping = aes(x = vote_average, fill = company_name)) +
+  geom_histogram(binwidth = 2)
+
+Disney_Pixar %>% 
+  select(vote_average,popularity,company_name) %>% 
+  infer::t_test(vote_average ~ company_name,
+         order = c("Pixar", "Disney")
+         ,var.equal = FALSE)
+
+```
+Searching for Disney id :`r Disney_id_table`
+
+Disney id (Walt Disney Pictures) was found to be 2.
+
+vote averages and vote counts for Disney movies :`r Disney_movie_table`
+
+vote averages and vote counts for Pixar movies :`r Pixar_movie_table`
+
+Using the box plot, it looks __vote_average__  is comparable for this set of movies (from year 2006) from Pixar and Disney.
+
+Here p-value is greater than 0.05  which means there is not a strong relationship between the variables __vote_average__ and __company_name__ of movies (from year 2006) from Pixar and Disney.

@@ -1,0 +1,393 @@
+---
+title: "Project 4"
+output: html_document
+---
+
+```{r}
+library(tidyr)
+library(readxl)
+library(stringr)
+library(dplyr)
+library(magrittr)
+library(ggplot2)
+library(knitr)
+library(janitor)
+
+
+athletes_data <- read_excel("olympics.xlsx", sheet = "athletes") %>% clean_names()
+country_data<-read_excel("olympics.xlsx",sheet = "country")%>% clean_names()
+games_data<-read_excel("olympics.xlsx", sheet = "games")%>% clean_names()
+medals_data<-read_excel("olympics.xlsx", sheet = "medals")%>% clean_names()
+```
+
+# Part 1
+
+some athletes competed for different countries over time
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+athlete_participated_different_country<-country_data %>% 
+  select(-age,-games)%>%
+  group_by(athlete_id)%>%
+  distinct(noc) %>% 
+  mutate(participation=n()) %>%  
+  filter(participation!=1)  
+
+# athlete_participated_different_country %>%
+#   arrange(desc(participation)) %>%
+#   #filter(participation!=1) %>%
+#   top_n(5) %>%
+#   knitr::kable(caption = "Athlete participation for different country") %>%
+#   kableExtra::kable_styling(
+#     bootstrap_options = "striped",
+#     full_width = F,
+#     position = "left"
+#   )
+
+  athlete_number<-athlete_participated_different_country%>%
+  group_by(athlete_id) %>%
+  summarise(total_number=n()) %>%
+  ungroup()
+
+  athlete_number<-athlete_participated_different_country%>%
+  distinct(athlete_id,participation) %>%
+  count(athlete_id,participation)
+  
+```
+
+Yes, 1570 athletes have participated for different (more than 1) countries.
+    
+# Part 2
+
+ten athletes that took part in most games
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+medals_athletes_left_join<-medals_data%>%
+  left_join(athletes_data, 
+            by = c("athlete_id" ="id"))
+
+Participation_number_of_games<-medals_athletes_left_join%>% 
+  distinct(athlete_id,games,name) %>% 
+  group_by(name) %>% 
+  summarise(number_of_games=n())%>%
+  arrange(desc(number_of_games))%>%
+  top_n(10)
+
+Participation_number_of_games_table<-Participation_number_of_games %>% 
+ knitr::kable(caption = "ten athletes that took part in most number of games") %>%
+    kableExtra::kable_styling(
+      bootstrap_options = "striped",
+      full_width = F,
+      position = "left"
+    )
+```
+
+ten athletes that took part in most games are :`r Participation_number_of_games_table`.
+
+# Part 3
+
+athlete(s) kept a Gold medal for the longest time
+
+```{r echo=TRUE, fig.height=10, fig.width=10, message=FALSE, warning=FALSE}
+
+games_id_data<-games_data %>%
+  filter(!(year==1956 & city =="Stockholm")) %>% 
+  arrange(season, year)  
+  
+games_id_data<-games_id_data %>% 
+  mutate(game_id=seq(1,nrow(games_id_data)))
+
+  #mutate(year=as.numeric(str_sub(games,start = 1L,end = 4L)))%>% 
+  #mutate(session=str_sub(games,start = 6L))
+  
+medal_game_left_join<-left_join(games_id_data, medals_data, by=c("games"))
+
+athlete_longest_sequence_data<-medal_game_left_join %>% 
+  filter(medal=="Gold") %>% 
+  distinct(athlete_id,event,game_id) %>% 
+  arrange(athlete_id,event,game_id) %>% 
+  group_by(athlete_id,event) %>% 
+  mutate(previous_game=lag(game_id,default=0)) %>% 
+  mutate(diff=game_id-previous_game) %>% 
+  mutate(gold_won_previous_game=if_else(diff==1,1,0)) %>% 
+  mutate(interruption=1-gold_won_previous_game) %>% 
+  mutate(sequence_number=cumsum(interruption)) %>% 
+  count(sequence_number) 
+
+athlete_longest_sequence_data%>% 
+  arrange(desc(n)) %>% 
+  head(20) %>% 
+ knitr::kable(caption = "athlete(s) kept a Gold medal for the longest time",
+              knitr.table.format = "html") %>%
+    kableExtra::kable_styling(
+      bootstrap_options = "striped",
+      full_width = F,
+      position = "left"
+    )
+```
+
+Fencing athlete(s) kept a Gold medal for the longest time.
+
+# Part 4
+
+country(ies) kept a Gold medal for the longest time
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+country_longest_sequence_data<-medal_game_left_join %>% 
+  filter(medal=="Gold") %>% 
+  distinct(team,event,game_id) %>% 
+  arrange(team,event,game_id) %>% 
+  group_by(team,event) %>% 
+  mutate(previous_game=lag(game_id,default=0)) %>% 
+  mutate(diff=game_id-previous_game) %>% 
+  mutate(gold_won_previous_game=if_else(diff==1,1,0)) %>% 
+  mutate(interruption=1-gold_won_previous_game) %>% 
+  mutate(sequence_number=cumsum(interruption)) %>% 
+  count(sequence_number) 
+
+country_longest_sequence_data %>% 
+  arrange(desc(n)) %>% 
+  head(20) %>% 
+ knitr::kable(caption = "Countries kept a Gold medal for the longest time") %>%
+    kableExtra::kable_styling(
+      bootstrap_options = "striped",
+      full_width = F,
+      position = "left"
+    )
+
+```
+
+United States kept the gold for the longest time.
+
+# Part 5
+
+ten athletes that competed in the most events (some athletes take part in more than one event during games)
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+athletes_participated_most_events<-medals_athletes_left_join%>% 
+  distinct(athlete_id,event,name) %>% 
+  group_by(name) %>% 
+  summarise(number_of_events=n())%>%
+  arrange(desc(number_of_events))%>%
+  top_n(10)   
+
+athletes_participated_most_events %>% 
+ knitr::kable(caption = "10 athletes that participated in most number of events") %>%
+    kableExtra::kable_styling(
+      bootstrap_options = "striped",
+      full_width = F,
+      position = "left"
+    )
+```
+
+
+# Part 6
+
+number of medals per country (rows) and per year (column)
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+top_15 <- medals_data %>%
+  mutate(team = stringr::str_extract(team, "\\D+")) %>%
+  mutate(team = stringr::str_replace_all(team, "[[:punct:]]", " ")) %>%
+  filter(complete.cases(.)) %>%
+  mutate(year = as.numeric(str_sub(games, start = 1L, end = 4L))) %>%
+  distinct(session,year, team, event, medal) %>%
+  count(team) %>% 
+  top_n(15) %>% 
+  pull(team)
+
+top_15_year <- medals_data %>%
+  mutate(team = stringr::str_extract(team, "\\D+")) %>%
+  mutate(team = stringr::str_replace_all(team, "[[:punct:]]", " ")) %>%
+  filter(complete.cases(.)) %>%
+  mutate(year = as.numeric(str_sub(games, start = 1L, end = 4L))) %>%
+  distinct(session,year, team, event, medal) %>%
+  filter(team %in% top_15 ) %>% 
+  count(team,year) 
+
+number_of_medals_per_country_pivoted <-
+  top_15_year %>%
+  arrange(year) %>% 
+  tidyr::pivot_wider(names_from = year,
+                     values_from = n)
+
+number_of_medals_per_country_pivoted %>%
+  knitr::kable(caption = "Number of medals per country (rows) and per year (column)") %>%
+  kableExtra::kable_styling(
+    bootstrap_options = "striped",
+    full_width = F,
+    position = "left"
+  )
+```
+
+# Part 7
+
+Relationship between country and the probability of winning a medal
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+library(infer)
+library(dplyr)
+
+medals_data_chi_test <- medals_data %>%
+  distinct(games, team, event,medal) %>% 
+  mutate(medal_won=if_else(is.na(medal),"not_won","won")) %>% 
+  filter(team %in% top_15 ) # chi square test
+
+medals_data_for_barplot<-medals_data_chi_test %>% 
+  count(team,medal_won,name = "medals_competed_won") %>% # barplot
+  group_by(team) %>% 
+  mutate(total_medals_competed=sum(medals_competed_won)) %>% 
+  filter(!(medal_won=="not_won")) %>% 
+  mutate(percentage=100*medals_competed_won/total_medals_competed)
+
+  ggplot2::ggplot(medals_data_for_barplot, aes(x= reorder(team,percentage), percentage)) + 
+  coord_flip()+
+#geom_bar(stat = "identity", aes(fill = medal_won))+  # I removed percentage of medal not_won #for aesthetics and redundant information.
+  geom_bar(stat = "identity")+
+    labs (
+    title = "Percentage of medals won by a team",
+    #subtitle = "colors distinguish whether medal was won or not",
+    caption = "Source: Medals data",
+    y = "Percentage of medals won",
+    x = "Participating countries"
+  )
+ 
+#medals_data_chi_test %>% 
+  #select(team, medal_won) %>% 
+  #t_test(formula = medal_won~team)  # dont understand why t-test did not work.
+
+team_medal_won_test<-medals_data_chi_test %>% 
+  chisq_test(formula = medal_won~team)
+  
+obs_chisq <- medals_data_chi_test  %>%
+  chisq_stat(formula = team ~ medal_won)
+
+chisq_null_theor <- medals_data_chi_test %>%
+  specify(team ~ medal_won) %>% 
+  hypothesize(null = "independence") %>%
+  calculate(stat = "Chisq")
+
+visualize(chisq_null_theor, method = "theoretical") +
+  shade_p_value(obs_stat = obs_chisq, direction = "left")+ xlim(0,100)
+```
+  
+The horizontal barchart for percentage of medals won by a country shows that countries like United States, Soviet Union and East Germany have higher percentage of medals won by their athletes.
+
+The results from chi squared test are: :`r team_medal_won_test`.
+After looking at the results from chi squared test, it seems there is no relationship between medal won by a country and team.
+
+# Part 8
+
+Scatterplot showing the average height and weight of competitors per sport
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+medals_atheltes_left_join<-medals_data%>%
+  left_join(athletes_data, 
+            by = c("athlete_id" ="id"))%>%
+  mutate(BMI=weight/(height/100)^2)
+
+average_weight_by_sport<-medals_atheltes_left_join%>%
+  group_by(sport)%>%
+  summarize(mean_weight = mean(weight, na.rm = TRUE))
+average_height_by_sport<-medals_atheltes_left_join%>%
+  group_by(sport)%>%
+  summarize(mean_height = mean(height, na.rm = TRUE))
+
+average_BMI_by_sport<-medals_atheltes_left_join%>%
+  group_by(sport)%>%
+  summarize(mean_BMI = mean(BMI, na.rm = TRUE))
+
+largest_weight_by_sport <- average_weight_by_sport %>%
+  slice(which.max(mean_weight))
+smallest_weight_by_sport <- average_weight_by_sport %>%
+  slice(which.min(mean_weight)) 
+largest_height_by_sport <- average_height_by_sport %>%
+  slice(which.max(mean_height))
+smallest_height_by_sport <- average_height_by_sport %>%
+  slice(which.min(mean_height)) 
+largest_BMI_by_sport <- average_BMI_by_sport %>%
+  slice(which.max(mean_BMI))
+smallest_BMI_by_sport <- average_BMI_by_sport %>%
+  slice(which.min(mean_BMI)) 
+
+weight_height<-left_join(average_weight_by_sport,average_height_by_sport, by=c("sport"))
+weight_height_BMI<-left_join(weight_height,average_BMI_by_sport, by=c("sport"))
+
+ggplot2::ggplot(data= weight_height_BMI,
+                aes(y=mean_weight, 
+                    x=mean_height,
+                    color=sport)) + geom_point() +
+  theme(legend.position="none")+
+  geom_text(data= weight_height_BMI%>%
+              slice(which.max(mean_weight)),
+            aes(label=stringr::str_c(largest_weight_by_sport$sport,
+                                     "largest weight by sport",sep="-")), check_overlap = T) +
+  geom_text(data= weight_height_BMI%>%
+              slice(which.min(mean_weight)),
+            aes(label=stringr::str_c(smallest_weight_by_sport$sport,
+                                     "smallest weight by sport",sep="-")), check_overlap = T) +
+  
+  geom_text(data= weight_height_BMI%>%
+              slice(which.max(mean_height)),
+            aes(label=stringr::str_c(largest_height_by_sport$sport,
+                                     "largest height by sport",sep="-")), check_overlap = T) +
+  
+  geom_text(data= weight_height_BMI%>%
+              slice(which.min(mean_height)),
+            aes(label=stringr::str_c(smallest_height_by_sport$sport,
+                                     "smallest height by sport",sep="-")), check_overlap = T) +
+  
+  geom_text(data= weight_height_BMI%>%
+              slice(which.max(mean_BMI)),
+            aes(label=stringr::str_c(largest_BMI_by_sport$sport,
+                                     "largest BMI by sport",sep="-")), check_overlap = T) +
+  
+  geom_text(data= weight_height_BMI%>%
+              slice(which.min(mean_BMI)),
+            aes(label=stringr::str_c(smallest_BMI_by_sport$sport,
+                                     "smallest BMI by sport",sep="-")), check_overlap = T) +
+  
+  labs(title = "average height and weight of competitors per sport",
+       subtitle = "Using colors to differentiate sport wise average weight and height of participants",
+       caption = "Source: Olympics",
+       x = "average height",
+       y = "average weight",
+       fill = "sport")
+```
+
+# Part 9 
+
+number of medals (gold, silver and bronze given per year, facet chart: summer and winter)
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE} 
+
+medals_category_year_session<-medals_data%>% 
+  distinct(games,medal,team,event)%>% 
+  mutate(year=as.numeric(str_sub(games,start = 1L,end = 4L)))%>%
+  mutate(session=str_sub(games,start = 5L))%>%
+  select(-games)%>%
+  arrange(desc(year))
+
+medals_per_year<- medals_category_year_session%>%
+  count(year, medal,session)
+
+
+# Line plot for Part 9
+
+medals_per_year %>% drop_na() %>% 
+  ggplot(mapping=aes(x=year, 
+                     y=n)) +
+  geom_line(aes(group=medal, color=medal)) +
+  theme(legend.position="bottom", legend.box = "horizontal")+ 
+  facet_wrap(vars(session))+
+  labs (title = "Evolution of total number of medals per year",
+        subtitle = "Using colors to differentiate medal categories",
+        caption = "Source: Olympics",
+        x = "Years",
+        y = "Total number of medals")
+```
+

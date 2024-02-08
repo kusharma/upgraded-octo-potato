@@ -1,0 +1,9 @@
+* text=auto
+*.md text eol=lf
+
+*.Rmd text eol=lf
+
+quick-portfolio-master/LICENSE text eol=crlf
+
+
+

@@ -1,0 +1,513 @@
+---
+title: "Project1"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+library(dplyr)
+library(xml2)
+library(rvest)
+library(httr)
+library(ggplot2)
+library(stringr)
+library(janitor)
+library(tidyr)
+library(purrr)
+library(ggmap)
+library(kableExtra)
+library(remedy)
+
+page_html <- xml2::read_html("https://epfl-exts.github.io/rental-scrape/")
+
+location<-page_html %>%
+  rvest::html_nodes(css = ".sec-info .address p") %>%
+  rvest::html_text() 
+    #View(location)
+
+price<-page_html %>%
+  rvest::html_nodes(css = ".price .float-right strong") %>%
+  rvest::html_text()
+  #View(price)
+
+currency<-page_html %>%
+  #rvest::html_nodes(css = "div .price>span.float-right") %>%
+  rvest::html_nodes(css = ".bg-sec-color .bg-text .price .float-right") %>%
+  rvest::html_text() 
+  
+object_type<-page_html %>%
+  rvest::html_nodes(css = ".bg-text .object-type") %>%
+  rvest::html_text() 
+
+rooms<-page_html %>%
+  rvest::html_nodes(css = ".rooms strong") %>%
+  rvest::html_text() %>% 
+  as.numeric()
+
+living_space<-page_html %>%
+  rvest::html_nodes(css = ".living-space p strong") %>%
+  rvest::html_text() 
+
+floor<-page_html %>%
+  rvest::html_nodes(css = ".floor p strong") %>%
+  rvest::html_text() 
+  #View(floor)
+
+availability<-page_html %>%
+  rvest::html_nodes(css = ".availability.sec-info2 p strong") %>%
+  rvest::html_text() 
+
+usable_surface<-page_html %>%
+  rvest::html_nodes(css = ".usable-surface p strong") %>%
+  rvest::html_text() 
+```
+
+# Part 1
+
+Get the full dataset out of the site
+
+```{r  message=FALSE, warning=FALSE}
+
+rental_tibble <- bind_cols(
+  location = location,
+  price = as.numeric(price),
+  #currency=stringr::str_extract(currency, "^\\[:aplha:]"),
+  currency = str_sub(currency, start = -3L),
+  object_type = object_type,
+  rooms = rooms,
+  living_space = living_space,
+  floor = floor,
+  availability = availability,
+  usable_surface = as.numeric(usable_surface)
+)
+
+rental_tibble <- rental_tibble %>%
+  mutate(floor = as.numeric(
+    stringr::str_replace(rental_tibble$floor, "Underground", "-1")
+  ))
+
+```
+# Part 2
+
+Scatterplot showing how price evolves with living space of the flat.
+
+```{r message=FALSE, warning=FALSE}
+
+price_living_space <- rental_tibble %>%
+  select(price, living_space) %>%
+  dplyr::filter(complete.cases(.)) %>%
+  tidyr::drop_na() %>%
+  #mutate(living_space=as.numeric(stringr::str_sub(living_space,start=1L, end=-3L)))
+  mutate(living_space = as.numeric(stringr::str_extract(living_space, "\\d+")))
+
+# str_extract(living_space, "\\d+")
+
+price_living_space %>%  ggplot2::ggplot(aes(x = price, y = living_space)) +
+  geom_point(alpha = .25) +
+  labs (
+    title = "Comparison of price vs living space ",
+    caption = "Source: Rental scrap website",
+    x = "Price of the rental space (CHF)",
+    y = "Living space (m^2)"
+  )
+
+maximum_price <- rental_tibble %>%
+  drop_na(price) %>%
+  pull(price) %>% 
+  max()
+```
+
+In the above scatter plot, there is a linear relationship between the two variables.
+
+The maximum price observed for the rooms is `r format(maximum_price,4)`.
+
+# Part 3
+
+A bar plot showing the number of properties by postcode.
+
+```{r fig.height=5, fig.width=5, message=FALSE, warning=FALSE}
+
+
+properties_postcode <- rental_tibble %>%
+  select(location) %>%
+  mutate(location = stringr::str_extract(location, "\\d{4}")) %>%
+  group_by(location) %>%
+  summarise(number_property_by_postcode=n()) %>%
+  arrange(desc(number_property_by_postcode)) %>% 
+  head (20)
+
+properties_postcode %>% ggplot2::ggplot(aes(x= reorder(location,number_property_by_postcode), number_property_by_postcode)) +
+  geom_bar(stat = "identity") + coord_flip()+
+  theme(legend.position = "right", legend.box = "horizontal") +
+  labs (
+    title = "Number of properties by postcode",
+    subtitle="Top 20 postcodes with most number of properties (in descending order) ",
+    caption = "Source: Rental scrap website",
+    y = "Number of properties",
+    x = "Postcode"
+  )
+
+active_areas <- properties_postcode %>%
+  arrange(desc(number_property_by_postcode)) %>%
+  ungroup() %>%
+  top_n(5)
+
+active_areas %>%
+  knitr::kable(caption = "Top five postcode with most number of rooms") %>%
+  kableExtra::kable_styling(
+    bootstrap_options = "striped",
+    full_width = F,
+    position = "left"
+  )
+```
+
+# Part 4
+
+Price evolution with living space of the flat by postcode and by floor
+
+```{r message=FALSE, warning=FALSE}
+
+price_living_space_postcode <- rental_tibble %>%
+  select(price, living_space, floor, location) %>%
+  mutate(living_space = as.numeric(stringr::str_sub(
+    living_space, start = 1L, end = -3L
+  ))) %>%
+  mutate(postcode = stringr::str_extract(location, "\\d{4}")) %>%
+  select(-location) %>%
+  dplyr::filter(complete.cases(.)) %>%
+  tidyr::drop_na() %>%
+  na.omit() %>%
+  group_by(floor) %>%
+  filter(floor %in% 1:6)
+
+price_living_space_postcode %>% ggplot(mapping = aes(x = living_space, y = price, fill =
+                                                       postcode)) +
+  geom_point(aes(group = postcode, color = postcode)) + facet_wrap(vars(floor)) +
+  theme(legend.position = "none") +
+  labs (
+    title = "Comparison of price over living space for nth floor",
+    subtitle = "Using colors to differentiate postcode and facet grid for the number of floor",
+    caption = "Source: Rental scrape data",
+    x = "Living surface in m2",
+    y = "Price (CHF)"
+  )
+
+Most_expensive_postcode_floor <- price_living_space_postcode %>%
+  select(floor, price, postcode) %>%
+  group_by(floor) %>%
+  slice(which.max(price))
+
+Most_expensive_postcode_floor %>%
+  knitr::kable(caption = "Postcode with most expensive price for nth floor") %>%
+  kableExtra::kable_styling(
+    bootstrap_options = "striped",
+    full_width = F,
+    position = "left"
+  )
+
+Least_expensive_postcode_floor <- price_living_space_postcode %>%
+  select(floor, price, postcode) %>%
+  group_by(floor) %>%
+  slice(which.min(price))
+
+Least_expensive_postcode_floor %>%
+  knitr::kable(caption = "Postcode with least expensive price for nth floor") %>%
+  kableExtra::kable_styling(
+    bootstrap_options = "striped",
+    full_width = F,
+    position = "left"
+  )
+
+
+# Adding text on facet charts for maximum and least price by postcode
+
+price_living_space_postcode %>%
+  ggplot(data = price_living_space_postcode,
+         mapping = aes(x = living_space, y = price, fill = postcode)) +
+  geom_point(aes(group = postcode, color = postcode)) + facet_wrap(vars(floor))+
+  geom_text(data = Most_expensive_postcode_floor,
+            aes(label = postcode, x = 10, y = 20000)) +
+  theme(legend.position = "none") +
+  labs (
+    title = "Comparison of price over living space for nth floor",
+    subtitle = "Colors: postcode,  facet grid : number of floor,
+    text: postcode to corresponding maximum price",
+    caption = "Source: Rental scrape data",
+    x = "Living surface in m2",
+    y = "Price (CHF)"
+  )
+price_living_space_postcode %>%
+  ggplot(data = price_living_space_postcode,
+         mapping = aes(x = living_space, y = price, fill = postcode)) +
+  geom_point(aes(group = postcode, color = postcode)) + facet_wrap(vars(floor))+
+  geom_text(data = Least_expensive_postcode_floor,
+            aes(label = postcode, x = 10, y = 20000)) +
+  theme(legend.position = "none") +
+  labs (
+    title = "Comparison of price over living space for nth floor",
+    subtitle = "Colors: postcode,  facet grid : number of floor,
+    text: postcode to corresponding minimum price",
+    caption = "Source: Rental scrape data",
+    x = "Living surface in m2",
+    y = "Price (CHF)"
+  )
+
+```
+
+Price increases apporximately linearly with area of living space for floors from 1 to 6. The relationship does not hold true for further floor numbers.
+
+# Part 5
+
+comparison of listings available only on demand
+
+```{r message=FALSE, warning=FALSE}
+
+comparison_listings_smaller <- rental_tibble %>%
+  select(location, price, rooms, floor, living_space) %>%
+  mutate(location =
+           str_to_lower(rental_tibble$location, locale = "en")) %>%
+  mutate(floor = as.numeric(stringr::str_replace(floor, "Underground", "-1")))
+
+comparison_listings <- comparison_listings_smaller %>%
+  mutate(
+    location =
+      str_replace(
+        comparison_listings_smaller$location,
+        "sur demande",
+        "address on request"
+      )
+  ) %>%
+  mutate(address_available =
+           ifelse(!is.na(
+             str_match(comparison_listings_smaller$location, "address on request")
+           ),
+           "address on request", "available")) %>%
+  group_by(address_available)
+
+# Price comparison for listings with and without address
+
+comparison_listings %>%
+  ggplot2::ggplot(mapping = aes(x = address_available, y = price, group =
+                                  address_available)) +
+  geom_boxplot(aes(colour = address_available)) +
+  labs(title = "Price comparison for listings with and without address",
+       y = "Price (CHF)",
+       x = "Availability of address")
+
+# living space comparison for listings with and without address
+comparison_listings <- comparison_listings %>%
+  mutate(living_space = as.numeric(stringr::str_extract(living_space, "\\d+")))
+
+
+comparison_listings %>%
+  ggplot2::ggplot(mapping = aes(x = address_available, y = living_space, group =
+                                  address_available)) +
+  geom_boxplot(aes(colour = address_available)) +
+  labs(title = "living space comparison for listings with and without address",
+       y = "Living space (m^2)",
+       x = "Availability of address")
+
+
+# floor comparison for listings with and without address
+comparison_listings %>%
+  ggplot2::ggplot(mapping = aes(x = address_available, y = floor, group =
+                                  address_available)) +
+  geom_boxplot(aes(colour = address_available)) + ylim(0, 20) +
+  labs(title = "floor comparison for listings with and without address",
+       y = "Floor number",
+       x = "Availability of address")
+
+```
+
+# Part 6
+
+Comparison of variable price per square-meter
+
+```{r message=FALSE, warning=FALSE}
+
+comparison_listings_price_square_meter <- comparison_listings %>%
+  select(price, living_space, address_available) %>%
+  filter(living_space >= 10) %>%
+  mutate(price_per_square_meter =
+           price / living_space)
+
+
+comparison_listings_price_square_meter_table <-
+  comparison_listings_price_square_meter %>%
+  select(price_per_square_meter, address_available) %>%
+  filter(!is.na(price_per_square_meter), !is.na(address_available)) %>%
+  group_by(address_available) %>%
+  summarise(
+    group_size = n(),
+    median = median(price_per_square_meter),
+    average = mean(price_per_square_meter),
+    standard_deviation = sd(price_per_square_meter),
+    maximum = max(price_per_square_meter),
+    minimum = min(price_per_square_meter)
+  )
+
+comparison_listings_price_square_meter_table %>%
+  knitr::kable(
+    caption = "Summary table for statistics of price per square meter") %>%
+  kableExtra::kable_styling(
+    bootstrap_options = "striped",
+    full_width = F,
+    position = "left"
+  )
+
+comparison_listings_price_square_meter %>%
+  ggplot(mapping = aes(x = address_available,
+                                y = price_per_square_meter, group =
+                                  address_available)) +
+  geom_boxplot(aes(colour = address_available)) +
+  labs(title = "Comparison of variable price per square-meter
+       depending upon address availability",
+       y = "Price per square meter (CHF/m^2)",
+       x = "Availability of address")
+
+comparison_listings_price_square_meter %>% 
+  select(address_available, price_per_square_meter) %>%
+  infer::t_test(
+    price_per_square_meter ~ address_available,
+    order = c("address on request", "available"),
+    var.equal = FALSE
+  )
+
+```
+ Using the box plot, it looks price per square meter is comparable for addresses which are already available on the webiste.
+ 
+After doing t-test on variable price_per_square_meter for lisitings of addresses that are classified as "address on request" and "available", it can be observed that two groups are comparable (or similar) for the variable price per square meter. This conclusion was deduced by looking at the box plot and also checking the p-value from the t-test.
+
+# Part 7 
+
+Comparison of variable price 
+
+```{r message=FALSE, warning=FALSE}
+
+comparison_listings_price_table <-
+  comparison_listings_price_square_meter %>%
+  select(price, address_available) %>%
+  filter(!is.na(price), !is.na(address_available)) %>%
+  group_by(address_available) %>%
+  summarise(
+    group_size = n(),
+    median = median(price),
+    average = mean(price),
+    standard_deviation = sd(price),
+    maximum = max(price),
+    minimum = min(price)
+  )
+
+comparison_listings_price_table %>%
+  knitr::kable(caption = "Summary table for statistics of price") %>%
+  kableExtra::kable_styling(
+    bootstrap_options = "striped",
+    full_width = F,
+    position = "left"
+  )
+
+comparison_listings_price_square_meter %>%
+  ggplot2::ggplot(mapping = aes(x = address_available, y = price, group =
+                                  address_available)) +
+  geom_boxplot(aes(colour = address_available)) +
+  labs(title ="Comparison of variable price depending upon address availability")
+
+comparison_listings_price_square_meter %>% select(address_available, price) %>%
+  infer::t_test(
+    price ~ address_available,
+    order = c("address on request", "available"),
+    var.equal = TRUE
+  )
+
+```
+From the box plot of price with address availability, it looks like "addresses on request" have higher price compared to addresses which are already "available" on the website. So the comparison result does change for variables "price per squre meter" and "price"
+
+After doing t-test on variable __price__ for lisitings of addresses that are classified as "address on request" and "available", it can be observed that two groups are not comparable (or not similar) for the variable price per square meter. This conclusion was deduced by looking at the box plot and also checking the p-value from the t-test.
+Here p-value is less than 0.05  which means there is a strong relationship between the variables __price__ and __address_available__. 
+
+# Part 8
+
+Plot latitude and longitude of 30 addresses on the map
+
+```{r message=FALSE, warning=FALSE, paged.print=FALSE}
+
+# #library(magrittr)
+# #library(purrr)
+# library(dplyr)
+# library(tidyr)
+# 
+# address <- rental_tibble %>%
+#   distinct(location) %>%
+#   mutate(location =
+#            str_to_lower(location, locale = "en")) %>%
+#   mutate(location =
+#            str_replace(location, "sur demande", "address on request")) %>%
+#   separate(location, sep = ",", c("street_name_number", "postcode_city")) %>%
+#   filter(street_name_number != "address on request") %>%
+#   mutate(postcode = as.numeric(stringr::str_extract(postcode_city, "\\d+"))) %>%
+#   filter(!is.na(postcode)) %>%
+#   mutate(city = stringr::str_sub(postcode_city, start = 6L, end = 50)) %>%
+#   mutate(country = "switzerland") %>%
+#   mutate(street_number = as.numeric(stringr::str_extract(street_name_number, "\\d+"))) %>%
+#   mutate(street_name = stringr::str_extract(street_name_number, "\\D+")) %>%
+#   #filter(street_name!= "rue du xxxi décembre") %>%
+#   dplyr::filter(complete.cases(.))
+# 
+# # Unable to filter street_name_number with special symbols "√" and roman numerals
+# # “	Route d\'A√Øre, 1219 A√Øre“
+# # "Rue du XXXI Décembre, 1207 Genève"
+# #  How can I filter for special symbols and roman numerals ?
+# 
+# address_sort30 <- address %>%
+#   mutate(
+#     address_API = str_glue_data(
+#       address,
+#       "{street_name}",
+#       "{street_number}",
+#       "{postcode}",
+#       "{city}",
+#       "{country}",
+#       .sep = "+"
+#     )
+#   ) %>%
+#   top_n(5)
+# 
+# latitude_longitude <- str_glue("https://geocode.xyz/",
+#                                "{address_sort30$address_API}",
+#                                "?json=1") %>%
+#   map(GET) %>%
+#   keep( ~ status_code(.) == 200) %>%
+#   map(content)
+# 
+# latitude_longitude <- latitude_longitude %>%
+#   purrr::map_df(magrittr::extract, c("latt", "longt")) %>%
+#   mutate(latt = as.numeric(latt), longt = as.numeric(longt))
+# 
+# # I have commented the leaflet code below
+# 
+# #library(leaflet)
+# #latitude_longitude %>%
+# #leaflet() %>%
+# #addTiles() %>%
+# #addMarkers(lng=~longt,lat=~latt)
+# 
+# switzerland_area <-
+#   c(
+#     left = 5.984921,
+#     bottom = 46.125663,
+#     right = 6.283006,
+#     top = 46.304166
+#   )
+# switzerland_map <- get_stamenmap(bbox = switzerland_area)
+# ggmap(switzerland_map) +
+#   geom_point(data = latitude_longitude ,
+#              aes(x = longt, y = latt, alpha = .5)) +
+#   labs(title = "Where are rental houses in Switzerland?",
+#        subtitle = "Geolocation of 30 listings from the rental data, mostly around Geneva")
+```

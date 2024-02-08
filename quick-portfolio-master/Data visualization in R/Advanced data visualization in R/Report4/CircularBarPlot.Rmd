@@ -1,0 +1,62 @@
+---
+title: 'Project4: Volcano Eruption Visualization'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = TRUE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+#Part1: Getting the data
+
+```{r}
+
+library(readr)
+library(tidyverse)
+library(dplyr)
+library(readtext)
+library(tidygraph)
+library(ggplot2)
+
+volcano <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/volcano.csv')
+eruptions <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/eruptions.csv')
+events <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/events.csv')
+tree_rings <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/tree_rings.csv')
+sulfur <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-05-12/sulfur.csv')
+```
+
+#Part1: Getting the data
+
+```{r}
+
+cols <- hcl.colors(10, "YlOrRd")
+
+x <- -10:10
+y <- -10:10
+z <- sqrt(outer(x ^ 2, y ^ 2, "+"))
+
+contour(x, y, z,
+        labcex = 1.2, labels = 1:10,
+        lwd = volcano$longitude, lty = volcano$latitude) 
+
+contour(volcano,
+        col = cols)
+
+# install.packages("MASS")
+library(MASS)
+
+# Data
+x <- rnorm(500)
+y <- rnorm(500)
+z <- kde2d(x, y, n = 50)
+
+plot(x, y, pch = 19)
+contour(z, lwd = 2 add = TRUE,
+        col = hcl.colors(10, "Spectral"))
+
+```
+

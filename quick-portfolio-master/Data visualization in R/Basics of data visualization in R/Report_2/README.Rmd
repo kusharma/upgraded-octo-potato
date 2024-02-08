@@ -1,0 +1,121 @@
+---
+title: "Report 2 : Network data"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+
+library(readr)
+library(tidyverse)
+library(ggplot2)
+library(lubridate)
+library(readxl)
+library(tidygraph)
+library(ggraph)
+
+edge_list <-read_excel("data/data.xlsx", sheet = "edges")
+node_list <-read_excel("data/data.xlsx", sheet = "nodes")
+
+```
+
+
+# Part 1 : A first impression of the network
+
+```{r}
+
+edge_data <- tbl_graph(
+  nodes = node_list,
+  edges = edge_list, directed=FALSE
+)
+
+ggraph(edge_data) +
+  geom_edge_link()+
+  geom_node_label(mapping = aes(label = name))+
+  ggtitle('A first impression of the network')  
+
+```
+
+
+# Part 2 : Personalize the network with relevant first name
+
+```{r}
+
+ggraph(edge_data) +
+  geom_edge_link() +
+  geom_node_label(mapping = aes(label = str_extract(name, "[^ ]+")))+
+  ggtitle('Personalize the network with relevant first name')  
+
+```
+
+# Part 3 and Part 4 : Well connected people, highlight the four individuals, Part 5: colour the graph
+
+```{r}
+
+top_four<-
+  edge_data %>%
+  activate(edges) %>% 
+  as.tibble() %>% 
+  pivot_longer(cols = c(from, to), values_to ="id") %>%
+  group_by(id) %>% 
+  summarise(n_edges=n()) %>% 
+  slice_max(order_by=n_edges, n=4)  %>% 
+  pull(id)
+
+edge_data <- edge_data %>%
+    activate(nodes) %>%
+    mutate(highlight= if_else(id %in% top_four, 1, 0),
+           color_to_highlight= if_else(id %in% top_four, id, NA_real_))
+
+edge_data <- edge_data %>%
+    activate(edges) %>%
+    mutate(
+        highlight= if_else(to %in% top_four | from %in% top_four, 1, 0),
+        color_to_highlight= case_when(
+          to %in% top_four & from %in% top_four ~ from, 
+          to %in% top_four ~ to,
+          from %in% top_four ~ from)
+    )
+
+ggraph(edge_data, layout = 'igraph', algorithm = 'kk') +
+  geom_edge_link(aes(alpha = highlight)) +
+  geom_node_label(mapping = aes(label = str_extract(name, "[^ ]+"),alpha = highlight), repel=TRUE)
+
+ggraph(edge_data, layout = 'igraph', algorithm = 'kk') +
+  geom_edge_link(aes(alpha = highlight, color=as.factor(color_to_highlight)), show.legend = F) +
+  geom_node_label(mapping = aes(label = str_extract(name, "[^ ]+"),alpha = highlight, color=as.factor(color_to_highlight)), repel=TRUE)
+ 
+top_four_names<-
+  edge_data %>%
+  activate(nodes) %>% 
+  filter(highlight==1) %>% 
+  pull(name)
+
+```
+
+The top four connected people in the network are `r top_four_names`.
+
+# Part 6 : Polishing up
+
+```{r}
+
+edge_data<-edge_data %>% 
+  activate(nodes) %>% 
+  mutate(filter_name=ifelse(id %in% top_four, name, ""))
+
+ggraph(edge_data, layout = 'igraph', algorithm = 'kk') +
+  geom_edge_link(aes(alpha = highlight, color=as.factor(color_to_highlight))) +
+  geom_node_label(mapping = aes(label = filter_name,
+                  alpha = case_when(highlight==1~1,
+                                    highlight==0~0), 
+                  color=as.factor(color_to_highlight)), repel=TRUE)+
+  geom_node_point() +
+  theme(legend.position = "none")
+
+```
